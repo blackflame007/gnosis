@@ -231,6 +231,20 @@ class Settings(BaseSettings):
     gnosis_prompt_preferences_enabled: bool = False
     gnosis_prompt_reasoning_enabled: bool = False
     gnosis_consolidation_schedule_enabled: bool = False
+    # Community subgraph: detect connected-component clusters among :Entity nodes
+    # per scope, generate LLM summaries, persist as :Community nodes. Closes the
+    # open-domain gap (~30 pp vs pure entity retrieval, per Zep/Graphiti analysis).
+    # Rebuilt via POST /v1/communities/rebuild or the consolidation schedule.
+    # Read path adds community summaries to aggregative/open-domain-routed queries.
+    gnosis_community_graph_enabled: bool = False
+    gnosis_community_min_entities: int = Field(default=3, ge=2, le=50)
+    gnosis_community_context_limit: int = Field(default=5, ge=1, le=20)
+    # Multi-query rewrite: when the sufficiency check fires (context insufficient),
+    # generate up to 3 complementary queries and RRF-fuse with the original results.
+    # EverMemOS fires on 31% of queries; expected multi-hop and open-domain gains.
+    # Requires gnosis_sufficiency_check_enabled=true to trigger.
+    gnosis_query_rewrite_enabled: bool = False
+    gnosis_query_rewrite_model: str = ""
     gnosis_memory_edit_enabled: bool = False
     gnosis_mcp_enabled: bool = False
     gnosis_mcp_agent_id: str = Field(default="mcp-client", min_length=1)

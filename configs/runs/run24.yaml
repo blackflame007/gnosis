@@ -1,0 +1,20 @@
+# Run 24 — LLM reranker experiment (LongMemEval_S primary target)
+#
+# Config: Run 18 baseline (extraction + entity graph + routing + CoN)
+# PLUS the listwise LLM reranker over the fused candidate pool.
+#
+# Hypothesis: Retrieval is the bottleneck on LongMemEval_S (full-context
+# oracle delta: 0.606 → 0.870). All strongest 2026 systems use a reranker
+# (Mnemis Qwen3-Reranker-8B ablation: 73.8 → 89.1; EverMemOS Qwen3-Reranker-4B;
+# agentmemory cross-encoder). gnosis's LLM reranker is already coded
+# (gnosis_rerank_enabled) but has no benchmark result yet.
+#
+# Deviation from Run 18: adds gnosis_rerank_enabled=true.
+# Use GNOSIS_RERANK_MODEL to override the model (defaults to GNOSIS_LLM).
+# Production benchmark result pending.
+
+gnosis_fact_extraction_enabled: true
+gnosis_entity_graph_enabled: true
+gnosis_adaptive_routing_enabled: true
+gnosis_chain_of_note_enabled: true
+gnosis_rerank_enabled: true

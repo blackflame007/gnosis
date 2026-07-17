@@ -58,6 +58,9 @@ flags. Full per-run detail: [docs/BENCHMARKS.md](../docs/BENCHMARKS.md).
 | 21 | [run21](runs/run21.yaml) | enumeration CoN | 71.7 | rejected |
 | 22 | [run22](runs/run22.yaml) | entity-grouped rendering (GRAVITY) | 71.9 | rejected |
 | 23 | [run23](runs/run23.yaml) | full-LOCOMO re-measure of Run 18 | 66.9–68.9¹ | apples-to-apples |
+| 24 | [run24](runs/run24.yaml) | + LLM reranker (LME_S target) | pending | reranker not yet benchmarked |
+| 25 | [run25](runs/run25.yaml) | + community graph + multi-query rewrite (LME_S) | pending | open-domain + multi-hop target |
 
 ¹ Run 23 is the full-10-conversation measurement (excl-adv J, two judges); all
-other rows are the subset-3 dev gate.
+other rows are the subset-3 dev gate. Runs 24–25 are queued LongMemEval_S
+experiments; ctx J column will be filled after measurement.

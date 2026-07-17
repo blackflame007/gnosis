@@ -25,6 +25,13 @@ Mirror of the canonical log in [gnosis-membench/RESULTS.md](https://github.com/n
 > **adversarial** (judge-robust J), **multi-hop on the judge-independent F1**.
 > Genuine weakness: **open-domain**. Full detail in the Run 23 section of
 > RESULTS.md.
+>
+> **LongMemEval_S competitive context (2026-07-17):** JordanMcCann agentmemory
+> 96.2%, Chronos (PwC) 95.60% with 100% knowledge-update, Mastra OM 94.87%
+> (gpt-4o judge). Primary target from 2026-07-04. Baseline L-0 in progress.
+> Community graph (`GNOSIS_COMMUNITY_GRAPH_ENABLED`) and multi-query rewrite
+> (`GNOSIS_QUERY_REWRITE_ENABLED`) target the open-domain and knowledge-update
+> gaps respectively. See gnosis-membench `RESULTS.md` and `docs/frontier-2026.md`.
 
 
 Canonical record of all gnosis memory-quality benchmark runs. Every run uses the

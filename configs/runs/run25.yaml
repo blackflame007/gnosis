@@ -1,0 +1,30 @@
+# Run 25 — Community graph + multi-query rewrite experiment (LongMemEval_S)
+#
+# Config: Run 18 baseline PLUS community graph detection (open-domain target)
+# and multi-query rewrite on insufficient context (multi-hop + open-domain).
+#
+# Hypotheses:
+# - Community subgraph (gnosis_community_graph_enabled): closes ~30 pp of the
+#   open-domain gap (Zep/Graphiti analysis; independent Memori Labs eval shows
+#   Zep 73.96% open-domain vs Mem0 44.79% — community layer is the structural
+#   difference). Run 23 open-domain J: 29.2 (gnosis) vs 29.2 baseline.
+# - Multi-query rewrite (gnosis_query_rewrite_enabled): EverMemOS fires rewrite
+#   on 31% of LoCoMo queries, targeting multi-hop (entity_pivot strategy) and
+#   temporal (temporal_calculation). Requires sufficiency check to trigger.
+#
+# Prerequisites:
+# - Rebuild communities for the test scope before benchmarking:
+#     curl -X POST $GNOSIS_URL/v1/communities/rebuild \
+#       -H "Authorization: Bearer $GNOSIS_ADMIN_OPERATOR_TOKEN"
+# - Set GNOSIS_LLM to a capable model (communities and rewrite make LLM calls).
+#
+# Deviations from Run 18: adds community graph + sufficiency + query rewrite.
+# Production benchmark results pending.
+
+gnosis_fact_extraction_enabled: true
+gnosis_entity_graph_enabled: true
+gnosis_adaptive_routing_enabled: true
+gnosis_chain_of_note_enabled: true
+gnosis_community_graph_enabled: true
+gnosis_sufficiency_check_enabled: true
+gnosis_query_rewrite_enabled: true
