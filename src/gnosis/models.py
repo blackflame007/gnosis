@@ -1073,3 +1073,14 @@ def default_skill_visibility(scope: MemoryVisibility | None = None) -> MemoryVis
 
 class HealthResponse(ContractModel):
     status: str
+
+
+class CommunityRebuildRequest(ContractModel):
+    scope: MemoryScope
+
+
+class CommunityRebuildResponse(ContractModel):
+    tenant_id: str
+    user_id: str
+    communities_built: int
+    entities_processed: int

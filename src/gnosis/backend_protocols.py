@@ -17,6 +17,8 @@ from gnosis.models import (
     ClientEvent,
     ClientEventBatchRequest,
     ClientEventBatchResponse,
+    CommunityRebuildRequest,
+    CommunityRebuildResponse,
     ConsolidationApplyRequest,
     ConsolidationApplyResponse,
     ConsolidationDryRunRequest,
@@ -221,6 +223,14 @@ class MemoryBackend(Protocol):
         self,
         request: ReasoningToolStatsRequest,
     ) -> ReasoningToolStatsResponse: ...
+
+
+@runtime_checkable
+class CommunityCapableBackend(Protocol):
+    async def rebuild_communities(
+        self,
+        request: CommunityRebuildRequest,
+    ) -> CommunityRebuildResponse: ...
 
 
 @runtime_checkable

@@ -10,9 +10,11 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException
 
 from gnosis.auth import Authenticator
-from gnosis.backend import BackendRequestError, MemoryBackend
+from gnosis.backend import BackendRequestError, CommunityCapableBackend, MemoryBackend
 from gnosis.models import (
     BufferFlushResponse,
+    CommunityRebuildRequest,
+    CommunityRebuildResponse,
     ConsolidationApplyRequest,
     ConsolidationApplyResponse,
     ConsolidationDryRunRequest,
@@ -239,6 +241,22 @@ def register_operator_routes(  # noqa: C901
     ) -> PreferenceRecord:
         authenticator.require_scope(request.scope)
         return await memory.add_preference(request)
+
+    @app.post(
+        "/v1/communities/rebuild",
+        dependencies=[Depends(authenticator.require_write_operator)],
+    )
+    async def rebuild_communities(
+        request: CommunityRebuildRequest,
+        memory: Annotated[MemoryBackend, Depends(get_backend)],
+    ) -> CommunityRebuildResponse:
+        authenticator.require_scope(request.scope)
+        if not isinstance(memory, CommunityCapableBackend):
+            raise HTTPException(
+                status_code=501,
+                detail="Community graph is unavailable.",
+            )
+        return await memory.rebuild_communities(request)
 
 
 def _tenant_stats_request(settings: Settings) -> SdkStatsRequest:

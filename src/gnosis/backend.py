@@ -5,7 +5,7 @@ import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, cast
 from uuid import UUID, uuid4
 
 from neo4j.exceptions import Neo4jError
@@ -19,6 +19,7 @@ from pydantic import TypeAdapter, ValidationError
 from gnosis.backend_protocols import (
     BackendCapabilityUnavailable,
     BackendRequestError,
+    CommunityCapableBackend,
     ExtractionPreviewBackend,
     MemoryBackend,
     MemoryNotFoundError,
@@ -30,6 +31,31 @@ from gnosis.bridge_traversal import (
     LiteLLMBridgeNamer,
     bridge_parameters,
     parse_bridge_names,
+)
+from gnosis.community_graph import (
+    COMMUNITY_FACT_CAP as _COMMUNITY_FACT_CAP,
+)
+from gnosis.community_graph import (
+    CREATE_COMMUNITY_INDEX_CYPHER as _CREATE_COMMUNITY_INDEX_CYPHER,
+)
+from gnosis.community_graph import (
+    FETCH_COMMUNITY_SUMMARIES_CYPHER as _FETCH_COMMUNITY_SUMMARIES_CYPHER,
+)
+from gnosis.community_graph import (
+    FETCH_ENTITIES_CYPHER as _FETCH_ENTITIES_CYPHER,
+)
+from gnosis.community_graph import (
+    FETCH_ENTITY_FACTS_CYPHER as _FETCH_ENTITY_FACTS_CYPHER,
+)
+from gnosis.community_graph import (
+    FETCH_RELATIONS_CYPHER as _FETCH_RELATIONS_CYPHER,
+)
+from gnosis.community_graph import (
+    CommunityRecord,
+    community_id_for,
+    community_write_statements,
+    summarize_community,
+    weakly_connected_components,
 )
 from gnosis.context_assembly import (
     MEMORY_SEARCH_CANDIDATE_LIMIT as _MEMORY_SEARCH_CANDIDATE_LIMIT,
@@ -303,6 +329,8 @@ from gnosis.models import (
     ClientEvent,
     ClientEventBatchRequest,
     ClientEventBatchResponse,
+    CommunityRebuildRequest,
+    CommunityRebuildResponse,
     ConsolidationApplyRequest,
     ConsolidationApplyResponse,
     ConsolidationDryRunRequest,
@@ -387,6 +415,7 @@ from gnosis.models import (
     SkillUsage,
     SufficiencyAssessment,
 )
+from gnosis.query_rewrite import LiteLLMQueryRewriter
 from gnosis.query_router import LiteLLMQueryRouter, QueryRouter, RouteDecision
 from gnosis.reasoning_support import (
     REASONING_READ_UNAVAILABLE_DETAIL as _REASONING_READ_UNAVAILABLE_DETAIL,
@@ -507,12 +536,16 @@ from gnosis.sufficiency import (
 )
 from gnosis.supersession import drop_superseded
 
+if TYPE_CHECKING:
+    from gnosis.graph_types import CypherParameters
+
 __all__ = [
     "BackendCapabilityUnavailable",
     "BackendRequestError",
     "BufferErrorCapableMemoryClient",
     "BufferFlushCapableMemoryClient",
     "BufferPendingCapableMemoryClient",
+    "CommunityCapableBackend",
     "ConsolidationCapableMemoryClient",
     "ConsolidationDryRunState",
     "ConsolidationIdempotencyRecord",
@@ -730,6 +763,14 @@ class Neo4jAgentMemoryBackend:
         )
         self._bridge_namer: BridgeNamer = bridge_namer or LiteLLMBridgeNamer(
             model=_routing_model(settings),
+            base_url=settings.litellm_base_url,
+            api_key=settings.litellm_api_key,
+        )
+        _rewrite_model = (
+            settings.gnosis_query_rewrite_model or settings.gnosis_llm
+        )
+        self._query_rewriter: LiteLLMQueryRewriter = LiteLLMQueryRewriter(
+            model=_rewrite_model,
             base_url=settings.litellm_base_url,
             api_key=settings.litellm_api_key,
         )
@@ -1052,7 +1093,16 @@ class Neo4jAgentMemoryBackend:
                     ),
                 )
 
+        if (
+            request.include_long_term
+            and decision.route == "aggregative"
+            and self._app_settings.gnosis_community_graph_enabled
+        ):
+            community_text = await self._get_community_context(request.scope)
+            _append_context_section(sections, "community", community_text)
+
         sufficiency = await self._assess_sufficiency(request.query, sections)
+        sections = await self._rewrite_and_expand(request, sections, sufficiency)
         sections = self._with_abstention_instruction(sections, decision)
         return MemoryContextResponse(sections=sections, sufficiency=sufficiency)
 
@@ -1178,6 +1228,249 @@ class Neo4jAgentMemoryBackend:
             sufficient=verdict.sufficient,
             reason=bounded_reason(verdict.reason),
         )
+
+    async def rebuild_communities(
+        self,
+        request: CommunityRebuildRequest,
+    ) -> CommunityRebuildResponse:
+        """Detect entity communities via BFS WCC and persist LLM summaries.
+
+        Reads the full entity + relation graph for the scope, runs weakly-
+        connected-components in Python (no Neo4j GDS required), skips
+        components below the configured minimum size, summarizes each via one
+        LLM call, and writes Community nodes + MEMBER_OF edges idempotently
+        via MERGE so repeat calls are safe. Any per-community failure (LLM or
+        write) is logged and skipped; the rebuild still returns a count of the
+        communities that succeeded.
+        """
+        scope = request.scope
+        tenant_id = scope.tenant_id
+        user_id = scope.user_id
+        scope_params: CypherParameters = {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+        }
+
+        async with self._memory_client() as client:
+            entity_rows, relation_rows = await asyncio.gather(
+                client.query.cypher(_FETCH_ENTITIES_CYPHER, scope_params),
+                client.query.cypher(_FETCH_RELATIONS_CYPHER, scope_params),
+            )
+
+        entities: list[str] = []
+        name_map: dict[str, str] = {}
+        for row in entity_rows:
+            normalized = row.get("normalized")
+            if not isinstance(normalized, str):
+                continue
+            entities.append(normalized)
+            name_val = row.get("name")
+            name_map[normalized] = name_val if isinstance(name_val, str) else normalized
+        edges: list[tuple[str, str]] = []
+        for row in relation_rows:
+            head = row.get("head_normalized")
+            tail = row.get("tail_normalized")
+            if isinstance(head, str) and isinstance(tail, str):
+                edges.append((head, tail))
+
+        components = weakly_connected_components(entities, edges)
+        min_size = self._app_settings.gnosis_community_min_entities
+        components = [c for c in components if len(c) >= min_size]
+
+        _model = self._app_settings.gnosis_llm
+        _base_url = self._app_settings.litellm_base_url
+        _api_key = self._app_settings.litellm_api_key
+
+        async def _build_one(members: list[str]) -> CommunityRecord | None:
+            fact_params: CypherParameters = {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "entity_normals": cast("list[JsonValue]", members),
+                "limit": _COMMUNITY_FACT_CAP,
+            }
+            try:
+                async with self._memory_client() as client:
+                    fact_rows = await client.query.cypher(
+                        _FETCH_ENTITY_FACTS_CYPHER, fact_params
+                    )
+            except (RuntimeError, OSError, Neo4jError) as err:
+                _LOGGER.warning(
+                    "community fact fetch failed; skipping community",
+                    extra={"error_type": type(err).__name__},
+                )
+                return None
+            fact_snippets: list[str] = []
+            for fr in fact_rows:
+                content = fr.get("content")
+                if isinstance(content, str) and content:
+                    fact_snippets.append(content)
+            entity_names = [name_map.get(m, m) for m in members]
+            summary = await summarize_community(
+                entity_names=entity_names,
+                fact_snippets=fact_snippets,
+                model=_model,
+                base_url=_base_url,
+                api_key=_api_key,
+            )
+            if summary is None:
+                return None
+            return CommunityRecord(
+                community_id=community_id_for(tenant_id, user_id, members),
+                normalized_members=members,
+                summary=summary,
+                member_count=len(members),
+            )
+
+        records_raw = await asyncio.gather(*[_build_one(c) for c in components])
+        valid_records: list[CommunityRecord] = [r for r in records_raw if r is not None]
+
+        await self._persist_community_records(valid_records, tenant_id, user_id)
+        return CommunityRebuildResponse(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            communities_built=len(valid_records),
+            entities_processed=len(entities),
+        )
+
+    async def _persist_community_records(
+        self,
+        records: list[CommunityRecord],
+        tenant_id: str,
+        user_id: str,
+    ) -> None:
+        """Write community MERGE + MEMBER_OF statements to Neo4j idempotently."""
+        if not records:
+            return
+        try:
+            async with self._memory_client() as client:
+                graph_write = _graph_write_query(client)
+                _ = await graph_write.execute_write(
+                    _CREATE_COMMUNITY_INDEX_CYPHER, {}
+                )
+                for record in records:
+                    for cypher, params in community_write_statements(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        community=record,
+                    ):
+                        _ = await graph_write.execute_write(cypher, params)
+        except (RuntimeError, OSError, Neo4jError) as err:
+            _LOGGER.warning(
+                "community write failed; communities may be partially persisted",
+                extra={"error_type": type(err).__name__},
+            )
+
+    async def _get_community_context(
+        self,
+        scope: MemoryScope,
+    ) -> str:
+        """Read persisted community summaries for the scope and format them.
+
+        Returns an empty string when community graph is disabled, no
+        communities exist yet, or the read fails - callers treat an empty
+        string as a no-op section.
+        """
+        if not self._app_settings.gnosis_community_graph_enabled:
+            return ""
+        limit = self._app_settings.gnosis_community_context_limit
+        params: CypherParameters = {
+            "tenant_id": scope.tenant_id,
+            "user_id": scope.user_id,
+            "limit": limit,
+        }
+        try:
+            async with self._memory_client() as client:
+                rows = await client.query.cypher(
+                    _FETCH_COMMUNITY_SUMMARIES_CYPHER, params
+                )
+        except (RuntimeError, OSError, Neo4jError) as err:
+            _LOGGER.warning(
+                "community context read failed; skipping community section",
+                extra={"error_type": type(err).__name__},
+            )
+            return ""
+        if not rows:
+            return ""
+        lines: list[str] = []
+        for row in rows:
+            summary = row.get("summary")
+            if isinstance(summary, str) and summary:
+                lines.append(f"- {summary}")
+        if not lines:
+            return ""
+        return "Entity community summaries:\n" + "\n".join(lines)
+
+    async def _rewrite_and_expand(
+        self,
+        request: MemoryContextRequest,
+        sections: list[MemoryContextSection],
+        sufficiency: SufficiencyAssessment | None,
+    ) -> list[MemoryContextSection]:
+        """Expand context via multi-query rewrite when the sufficiency check fails.
+
+        On sufficiency failure, generates complementary retrieval queries via
+        the configured rewrite model, runs dense retrieval for each, dedupes
+        against the already-retrieved fact IDs, and appends novel facts as an
+        additional ``query_rewrite`` section. A no-op (returns ``sections``
+        unchanged) when:
+        - GNOSIS_QUERY_REWRITE_ENABLED is off
+        - the sufficiency check was not run (``None``) or assessed sufficient
+        - the rewriter returns no alternative queries
+        - all rewrite candidates were already retrieved
+        """
+        if not self._app_settings.gnosis_query_rewrite_enabled:
+            return sections
+        if sufficiency is None or sufficiency.sufficient:
+            return sections
+        if not request.query:
+            return sections
+
+        existing_context = "\n\n".join(s.content for s in sections)
+        reason = sufficiency.reason if sufficiency.assessed else None
+
+        rewrite_result = await self._query_rewriter.rewrite(
+            original_query=request.query,
+            retrieved_context=existing_context,
+            insufficiency_reason=reason,
+        )
+        if rewrite_result is None or not rewrite_result.queries:
+            return sections
+
+        metadata = _scope_metadata(request.scope)
+        decision = RouteDecision.from_settings(self._app_settings)
+
+        rewrite_facts: list[JsonObject] = []
+        async with self._memory_client() as client:
+            for alt_query in rewrite_result.queries:
+                try:
+                    alt_facts = await self._query_ranked_facts(
+                        client, alt_query, metadata, decision
+                    )
+                    rewrite_facts.extend(alt_facts)
+                except (RuntimeError, OSError, Neo4jError) as err:
+                    _LOGGER.warning(
+                        "rewrite retrieval failed for alternative query",
+                        extra={"error_type": type(err).__name__},
+                    )
+
+        # Collect IDs already in sections via fact objects - use content as
+        # dedup key since section text is already serialized.
+        seen_content: set[str] = {s.content for s in sections}
+        novel_lines: list[str] = []
+        for fact in rewrite_facts:
+            line = _fact_context_line(fact)
+            if line not in seen_content:
+                novel_lines.append(line)
+                seen_content.add(line)
+
+        if not novel_lines:
+            return sections
+
+        rewrite_text = "\n".join(novel_lines)
+        return [
+            *sections,
+            MemoryContextSection(source="query_rewrite", content=rewrite_text),
+        ]
 
     async def _reranked_facts(
         self,
