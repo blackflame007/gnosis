@@ -453,6 +453,7 @@ def build_memory_settings(settings: Settings) -> MemorySettings:
             dimensions=settings.gnosis_embedding_dimensions,
             api_base=settings.litellm_base_url,
             api_key=settings.litellm_api_key,
+            truncate="END",
         ),
         memory=build_memory_config(settings),
     )
