@@ -114,6 +114,7 @@ class RouteDecision:
     bridge_traversal: bool
     chain_of_note: bool
     budget_multiplier: int
+    supersession_enabled: bool
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "RouteDecision":
@@ -128,6 +129,7 @@ class RouteDecision:
             bridge_traversal=settings.gnosis_bridge_traversal_enabled,
             chain_of_note=settings.gnosis_chain_of_note_enabled,
             budget_multiplier=settings.gnosis_coverage_budget_multiplier,
+            supersession_enabled=settings.gnosis_read_supersession_enabled,
         )
 
     @classmethod
@@ -176,6 +178,18 @@ class RouteDecision:
                 settings.gnosis_coverage_budget_multiplier
                 if route in ("multi_hop", "aggregative")
                 else 1
+            ),
+            # Temporal queries ask for historical first-occurrence or
+            # timestamped events. Supersession's "newest-wins" aggregation
+            # discards earlier facts for the same slot, removing the dated
+            # history that temporal retrieval needs (L-4 result: -21pp vs
+            # L-0 baseline when supersession was applied globally).
+            # Unanswerable-risk also opts out: it needs the full fact set
+            # to correctly conclude "this topic was never mentioned" rather
+            # than being misled by a thin slice of the most-recent context.
+            supersession_enabled=(
+                route not in ("temporal", "unanswerable_risk")
+                and settings.gnosis_read_supersession_enabled
             ),
         )
 

@@ -1552,7 +1552,7 @@ class Neo4jAgentMemoryBackend:
             [*graph_facts, *traversal_facts, *bridge_facts],
         )
         facts = await self._recall_filtered_facts(request.query, facts)
-        facts = self._superseded_facts(facts)
+        facts = self._superseded_facts(facts, decision=decision)
         facts = await self._reranked_facts(request.query, facts, route=decision.route)
         facts = _cut_with_graph_reserve(
             facts,
@@ -2110,9 +2110,19 @@ class Neo4jAgentMemoryBackend:
             ],
         )
 
-    def _superseded_facts(self, facts: list[JsonObject]) -> list[JsonObject]:
+    def _superseded_facts(
+        self,
+        facts: list[JsonObject],
+        *,
+        decision: RouteDecision | None = None,
+    ) -> list[JsonObject]:
         """Drop same-slot older facts from the ranked context candidates."""
-        if not self._app_settings.gnosis_read_supersession_enabled:
+        enabled = (
+            decision.supersession_enabled
+            if decision is not None
+            else self._app_settings.gnosis_read_supersession_enabled
+        )
+        if not enabled:
             return facts
         kept, dropped = drop_superseded(facts, _fact_freshness)
         _log_supersession(dropped, len(facts), surface="context")
