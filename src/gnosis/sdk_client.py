@@ -446,11 +446,16 @@ class _TruncatingEmbedding:
 
     def __init__(self, inner: LiteLLMEmbeddingProvider) -> None:
         self._inner = inner
+        self.model = inner.model
         self.dimensions = inner.dimensions
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
         truncated = [t[:30_000] if len(t) > 30_000 else t for t in texts]
         return await self._inner.embed(truncated)
+
+    async def embed_one(self, text: str) -> list[float]:
+        result = await self.embed([text[:30_000]])
+        return result[0]
 
 
 def build_memory_settings(settings: Settings) -> MemorySettings:
