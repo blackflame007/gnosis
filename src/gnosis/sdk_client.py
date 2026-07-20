@@ -435,6 +435,24 @@ class TextEmbedder(Protocol):
     def embed(self, text: str) -> Awaitable[list[float]]: ...
 
 
+class _TruncatingEmbedding:
+    """Wraps LiteLLMEmbeddingProvider, pre-truncating texts to 30 000 chars.
+
+    Azure-proxied embedding models on the NVIDIA gateway reject inputs over
+    8 192 tokens. LiteLLM's ``truncate`` kwarg is silently dropped for the
+    ``openai`` provider prefix, so we pre-truncate at the character level
+    (30 000 chars ≈ 7 500 tokens at ~4 chars/token, safely under the limit).
+    """
+
+    def __init__(self, inner: LiteLLMEmbeddingProvider) -> None:
+        self._inner = inner
+        self.dimensions = inner.dimensions
+
+    async def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        truncated = [t[:30_000] if len(t) > 30_000 else t for t in texts]
+        return await self._inner.embed(truncated)
+
+
 def build_memory_settings(settings: Settings) -> MemorySettings:
     return MemorySettings(
         backend="bolt",
@@ -448,12 +466,13 @@ def build_memory_settings(settings: Settings) -> MemorySettings:
             api_base=settings.litellm_base_url,
             api_key=settings.litellm_api_key,
         ),
-        embedding=LiteLLMEmbeddingProvider(
-            litellm_embedding_model(settings.gnosis_embedding),
-            dimensions=settings.gnosis_embedding_dimensions,
-            api_base=settings.litellm_base_url,
-            api_key=settings.litellm_api_key,
-            truncate="END",
+        embedding=_TruncatingEmbedding(
+            LiteLLMEmbeddingProvider(
+                litellm_embedding_model(settings.gnosis_embedding),
+                dimensions=settings.gnosis_embedding_dimensions,
+                api_base=settings.litellm_base_url,
+                api_key=settings.litellm_api_key,
+            )
         ),
         memory=build_memory_config(settings),
     )
