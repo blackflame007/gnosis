@@ -150,7 +150,11 @@ class RouteDecision:
         """
         return cls(
             route=route,
-            hybrid_retrieval=route == "temporal",
+            # Temporal gets hybrid BM25 (Run 6: exact dates/names in verbatim
+            # turns). Aggregative also gets it: LME_S analysis shows exact
+            # keyword matching surfaces scattered per-event facts (art events,
+            # camping trips) that fall below the dense-only top-20 cut.
+            hybrid_retrieval=route in ("temporal", "aggregative"),
             graphqa_fusion=route == "multi_hop",
             verbatim_expansion=route == "multi_hop",
             abstention_prompt=route == "unanswerable_risk",
