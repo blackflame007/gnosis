@@ -416,7 +416,7 @@ from gnosis.models import (
     SufficiencyAssessment,
 )
 from gnosis.query_rewrite import LiteLLMQueryRewriter
-from gnosis.query_router import LiteLLMQueryRouter, QueryRouter, RouteDecision
+from gnosis.query_router import LiteLLMQueryRouter, QueryRoute, QueryRouter, RouteDecision
 from gnosis.reasoning_support import (
     REASONING_READ_UNAVAILABLE_DETAIL as _REASONING_READ_UNAVAILABLE_DETAIL,
 )
@@ -1476,6 +1476,7 @@ class Neo4jAgentMemoryBackend:
         self,
         query: str,
         facts: list[JsonObject],
+        route: QueryRoute | None = None,
     ) -> list[JsonObject]:
         """Reorder fused candidates by query relevance before the budget cut.
 
@@ -1483,11 +1484,17 @@ class Neo4jAgentMemoryBackend:
         while the flag is off, the query is empty, or there is nothing to
         reorder. Any failure degrades to the input order so reranking never
         drops a candidate or blocks a context read.
+
+        Route-aware: temporal and unanswerable_risk routes skip reranking.
+        Temporal BM25+dense ordering is already measured-best (Run L-1:
+        reranker −15.8pp on temporal); unanswerable_risk relies on retrieval
+        exhaustion for correct abstention, not relevance reordering.
         """
         if (
             not self._app_settings.gnosis_rerank_enabled
             or not query
             or len(facts) < MIN_RERANK_CANDIDATES
+            or route in ("temporal", "unanswerable_risk")
         ):
             return facts
         cap = rerank_candidate_cap(self._app_settings)
@@ -1546,7 +1553,7 @@ class Neo4jAgentMemoryBackend:
         )
         facts = await self._recall_filtered_facts(request.query, facts)
         facts = self._superseded_facts(facts)
-        facts = await self._reranked_facts(request.query, facts)
+        facts = await self._reranked_facts(request.query, facts, route=decision.route)
         facts = _cut_with_graph_reserve(
             facts,
             request.max_items * decision.budget_multiplier,
