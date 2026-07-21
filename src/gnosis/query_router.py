@@ -187,8 +187,11 @@ class RouteDecision:
             # Unanswerable-risk also opts out: it needs the full fact set
             # to correctly conclude "this topic was never mentioned" rather
             # than being misled by a thin slice of the most-recent context.
+            # Aggregative also opts out: summing/counting across sessions
+            # requires all occurrences; "newest-wins" discards older values
+            # that are addends (e.g. combined reading time across two books).
             supersession_enabled=(
-                route not in ("temporal", "unanswerable_risk")
+                route not in ("temporal", "unanswerable_risk", "aggregative")
                 and settings.gnosis_read_supersession_enabled
             ),
         )
