@@ -115,6 +115,7 @@ class RouteDecision:
     chain_of_note: bool
     budget_multiplier: int
     supersession_enabled: bool
+    sufficiency_check_enabled: bool
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "RouteDecision":
@@ -130,6 +131,7 @@ class RouteDecision:
             chain_of_note=settings.gnosis_chain_of_note_enabled,
             budget_multiplier=settings.gnosis_coverage_budget_multiplier,
             supersession_enabled=settings.gnosis_read_supersession_enabled,
+            sufficiency_check_enabled=settings.gnosis_sufficiency_check_enabled,
         )
 
     @classmethod
@@ -193,6 +195,14 @@ class RouteDecision:
             supersession_enabled=(
                 route not in ("temporal", "unanswerable_risk", "aggregative")
                 and settings.gnosis_read_supersession_enabled
+            ),
+            # Sufficiency check signals "not enough info" — useful only for
+            # unanswerable_risk, where detecting genuine absence is the goal.
+            # Applied globally it marks temporal/SSU facts as insufficient and
+            # the model abstains on answerable questions (L-6: -16pp temporal).
+            sufficiency_check_enabled=(
+                route == "unanswerable_risk"
+                and settings.gnosis_sufficiency_check_enabled
             ),
         )
 

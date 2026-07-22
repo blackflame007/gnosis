@@ -1101,7 +1101,7 @@ class Neo4jAgentMemoryBackend:
             community_text = await self._get_community_context(request.scope)
             _append_context_section(sections, "community", community_text)
 
-        sufficiency = await self._assess_sufficiency(request.query, sections)
+        sufficiency = await self._assess_sufficiency(request.query, sections, decision=decision)
         sections = await self._rewrite_and_expand(request, sections, sufficiency)
         sections = self._with_abstention_instruction(sections, decision)
         return MemoryContextResponse(sections=sections, sufficiency=sufficiency)
@@ -1202,6 +1202,8 @@ class Neo4jAgentMemoryBackend:
         self,
         query: str,
         sections: list[MemoryContextSection],
+        *,
+        decision: RouteDecision | None = None,
     ) -> SufficiencyAssessment | None:
         """Judge whether the assembled context can answer the query.
 
@@ -1210,7 +1212,12 @@ class Neo4jAgentMemoryBackend:
         failure degrades to ``assessed=False`` so the check never blocks the
         context response.
         """
-        if not self._app_settings.gnosis_sufficiency_check_enabled or not query:
+        enabled = (
+            decision.sufficiency_check_enabled
+            if decision is not None
+            else self._app_settings.gnosis_sufficiency_check_enabled
+        )
+        if not enabled or not query:
             return None
         context = "\n\n".join(section.content for section in sections)
         try:
