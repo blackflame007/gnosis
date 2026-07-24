@@ -1914,9 +1914,10 @@ class Neo4jAgentMemoryBackend:
         Strictly additive: extraction and per-unit write failures log a
         structured warning and leave the verbatim add untouched.
         """
+        conversation_date = _conversation_date(caller_metadata)
         units = await extract_memory_units(
             self._fact_extractor,
-            conversation_date=_conversation_date(caller_metadata),
+            conversation_date=conversation_date,
             context_turns=context_turns,
             new_turns=new_turns,
         )
@@ -1930,6 +1931,7 @@ class Neo4jAgentMemoryBackend:
                         unit=unit,
                         caller_metadata=caller_metadata,
                         source_memory_ids=source_memory_ids,
+                        conversation_date=conversation_date,
                     ),
                 )
             except (
@@ -1954,6 +1956,7 @@ class Neo4jAgentMemoryBackend:
         unit: MemoryUnit,
         caller_metadata: JsonObject,
         source_memory_ids: list[str],
+        conversation_date: str | None = None,
     ) -> MemoryAddResult:
         """Write one extracted unit as an ordinary long-term ``Fact`` node.
 
@@ -1970,6 +1973,16 @@ class Neo4jAgentMemoryBackend:
         }
         if unit.event_date is not None:
             extraction_metadata["event_date"] = unit.event_date
+        # Store the conversation date as the observation anchor so temporal
+        # queries see when this fact was true, not when gnosis ingested it.
+        # event_date wins (more specific); this is the fallback for ongoing-state
+        # facts like "has been doing X for N months" where no specific event date
+        # exists. Without this, _fact_date() falls through to created_at (today),
+        # which is wrong and causes temporal hallucinations in the answer model.
+        if conversation_date:
+            extraction_metadata["date"] = conversation_date
+        if unit.temporal_state not in ("unknown", None):
+            extraction_metadata["temporal_state"] = unit.temporal_state
         metadata = _write_metadata(scope, caller_metadata | extraction_metadata, None)
         # Provenance ids are gateway-generated fact UUIDs, added after
         # redaction because the opaque-value secret pattern matches UUIDs.

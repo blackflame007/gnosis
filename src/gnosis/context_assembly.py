@@ -71,7 +71,12 @@ _FACT_SCOPE_FIELDS = {
 }
 
 # Temporal anchor for rendered facts: a stored date tag wins over created_at.
-_FACT_DATE_METADATA_KEYS = ("session_date", "date")
+# Priority: session_date (caller-supplied) > event_date (LLM-extracted specific
+# event date) > date (conversation_date stored at ingest as observation anchor) >
+# created_at (ingest timestamp — wrong for temporal reasoning; last resort only).
+# event_date was previously missing from this tuple, causing every extracted fact
+# to render with the ingest date instead of the date the event actually occurred.
+_FACT_DATE_METADATA_KEYS = ("session_date", "event_date", "date")
 
 
 async def query_recent_facts(
