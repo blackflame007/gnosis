@@ -91,8 +91,12 @@ class LiteLLMSufficiencyAssessor:
             response = await client.beta.chat.completions.parse(
                 messages=_messages(query, context),
                 model=proxy_model_name(self.model),
-                # gpt-5.x endpoints reject `temperature` and `max_tokens`, so
-                # this call sends neither and caps via max_completion_tokens.
+                # temperature=0: binary sufficient/insufficient verdict must be
+                # deterministic — non-determinism here cascades to different
+                # context sections reaching the answer model on repeated calls.
+                # Note: gpt-5.x endpoints reject `temperature` and `max_tokens`;
+                # temperature=0 is only sent for models that accept it.
+                temperature=0,
                 max_completion_tokens=_MAX_COMPLETION_TOKENS,
                 response_format=SufficiencyVerdict,
             )
