@@ -38,6 +38,12 @@ Context is sufficient only when the memories, on their own, fully determine a
 correct answer to the query. If the answer is missing, only partially covered,
 or the query presupposes something the memories do not support, it is not
 sufficient. Return sufficient true/false and a short reason (one sentence).
+
+Critical: a memory is relevant only if it directly addresses the specific
+topic or entity the query asks about. The presence of dates, timestamps, or
+temporal context on a retrieved fact does NOT make it relevant to a different
+topic. If the retrieved memories discuss unrelated subjects — even with
+plausible dates — the context is NOT sufficient.
 """.strip()
 
 # The response is a boolean plus one short sentence, so a small cap holds the
