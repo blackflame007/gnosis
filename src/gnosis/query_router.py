@@ -66,8 +66,9 @@ _ROUTER_GUIDE: Final[str] = """
 You classify one memory-retrieval query into exactly one route.
 Routes:
 - temporal: asks when something happened, a date, a duration, an ordering in
-  time, or "how long ago / how many days" (e.g. "When did Maria adopt the
-  cat?", "How long has Tom worked at the bakery?").
+  time, or "how long ago / how many days / how many months" (e.g. "When did
+  Maria adopt the cat?", "How long has Tom worked at the bakery?", "How long
+  had I been running when I finished my first 5K?").
 - multi_hop: needs two or more distinct remembered facts chained through a
   bridge entity to answer (e.g. "What instrument does the sister of John's
   coworker play?", "Which city is the company that Ana joined based in?").
@@ -75,8 +76,16 @@ Routes:
   conversations or topics (e.g. "What do they usually talk about?", "List all
   the hobbies mentioned.").
 - unanswerable_risk: presupposes or asks about something personal memories
-  likely never contain, fishing for a fact that was probably never said
-  (e.g. "What brand of toothpaste does Bob's dentist recommend?").
+  definitively do not contain — a private/obscure fact that could not
+  realistically appear in casual personal conversation
+  (e.g. "What brand of toothpaste does Bob's dentist recommend?",
+  "What is my coworker's mother's maiden name?").
+  CRITICAL: When the query says "I mentioned X", "I told you X", "I discussed
+  X", or otherwise signals the user KNOWS the topic was recorded, that fact IS
+  in memory — choose single_hop, temporal, multi_hop, or aggregative as
+  appropriate, NEVER unanswerable_risk. Also prefer temporal over
+  unanswerable_risk whenever the query asks how long, when, what date, or how
+  many days/months — those are duration/time questions, not absence questions.
 - single_hop: everything else - one remembered fact answers it directly.
 Choose the single best route. Respond with only the route name.
 """.strip()
