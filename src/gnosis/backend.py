@@ -678,6 +678,37 @@ _ENUMERATION_CLAUSE_ROUTES: Final[frozenset[str]] = frozenset(
     {"multi_hop", "aggregative"},
 )
 
+_INSUFFICIENCY_WARNING: Final[str] = (
+    "Note: The retrieved memories do not fully cover this query. "
+    "If the question cannot be answered with confidence from the memories "
+    "above — for example, because a referenced person, event, or task is "
+    "absent — say you don't know rather than speculating from partial evidence."
+)
+
+
+def _with_insufficiency_warning(
+    sections: list[MemoryContextSection],
+    sufficiency: SufficiencyAssessment | None,
+) -> list[MemoryContextSection]:
+    """Append a not-sufficient note when the check says context is incomplete.
+
+    When query rewrite is disabled (or exhausted) and the sufficiency check
+    still says False, this note is the only signal reaching the answering
+    model. It tells the model to abstain rather than reason from partial
+    evidence — e.g. ordering two tasks when only one is in memory.
+    """
+    if (
+        sufficiency is None
+        or not sufficiency.assessed
+        or sufficiency.sufficient
+        or not sections
+    ):
+        return sections
+    return [
+        *sections,
+        MemoryContextSection(source="not_sufficient", content=_INSUFFICIENCY_WARNING),
+    ]
+
 
 @dataclass(frozen=True, slots=True)
 class LongTermFactsContext:
@@ -1103,6 +1134,7 @@ class Neo4jAgentMemoryBackend:
 
         sufficiency = await self._assess_sufficiency(request.query, sections, decision=decision)
         sections = await self._rewrite_and_expand(request, sections, sufficiency)
+        sections = _with_insufficiency_warning(sections, sufficiency)
         sections = self._with_abstention_instruction(sections, decision)
         return MemoryContextResponse(sections=sections, sufficiency=sufficiency)
 

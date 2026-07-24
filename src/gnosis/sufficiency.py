@@ -44,6 +44,12 @@ topic or entity the query asks about. The presence of dates, timestamps, or
 temporal context on a retrieved fact does NOT make it relevant to a different
 topic. If the retrieved memories discuss unrelated subjects — even with
 plausible dates — the context is NOT sufficient.
+
+Comparative queries: when the query asks to compare, order, or determine
+which of two or more named events, tasks, or entities came first / happened
+before / occurred sooner, ALL of the referenced items must be present in the
+retrieved memories. If any named item is absent, the context is NOT sufficient
+— you cannot determine ordering when evidence for one item is entirely missing.
 """.strip()
 
 # The response is a boolean plus one short sentence, so a small cap holds the
