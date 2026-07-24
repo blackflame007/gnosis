@@ -169,7 +169,10 @@ class RouteDecision:
             # camping trips) that fall below the dense-only top-20 cut.
             hybrid_retrieval=route in ("temporal", "aggregative"),
             graphqa_fusion=route == "multi_hop",
-            verbatim_expansion=route == "multi_hop",
+            # Temporal also gets verbatim expansion: source conversation text
+            # provides date context that extracted facts may compress away
+            # (e.g. "about 2 months ago from [date]" vs just "2 months").
+            verbatim_expansion=route in ("multi_hop", "temporal"),
             abstention_prompt=route == "unanswerable_risk",
             graph_traversal=(
                 route == "multi_hop" and settings.gnosis_graph_traversal_enabled
