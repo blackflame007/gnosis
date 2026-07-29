@@ -696,12 +696,21 @@ _ENUMERATION_CLAUSE_ROUTES: Final[frozenset[str]] = frozenset(
 # about" prevents this. Also added "unless the question asks about a past or
 # initial state" to stop the clause from overriding correctly-retrieved initial
 # values when the question uses words like "initially", "originally", "at first".
+# L-14 lesson: "same specific fact the question is asking about" was STILL not
+# tight enough — GPT-4o treated "guitar practice time" as the same specific fact
+# as "violin practice time" because both are "daily practice time." The fix is to
+# restructure the clause so it fires ONLY on memories already identified as
+# relevant. In L-9/L-12 (without strong clause), GPT-4o correctly filtered guitar
+# memories as non-relevant to a violin question; the "state that value directly"
+# override then bypassed that correct judgment. By leading with "among the
+# memories you've identified as relevant," the model applies its own relevance
+# filter first, and the recency rule is confined to that already-filtered set.
 _CON_RECENCY_CLAUSE: Final[str] = (
-    " When memories give conflicting values for the same specific fact the "
-    "question is asking about, the most recently-dated value is the correct "
-    "current state — state that value directly, unless the question asks about "
-    "a past or initial state. Never calculate or project a current value from "
-    "rates, trends, or growth patterns stated in the memories."
+    " Among the memories you have identified as relevant above, if two or more "
+    "give different values for the same fact, the most recently-dated value is "
+    "the correct current state — state it directly as your answer, unless the "
+    "question asks about a past or initial state. Never calculate or project a "
+    "current value from rates, trends, or growth patterns stated in the memories."
 )
 # The recency clause must not fire on temporal-routed reads: temporal questions
 # ask about a SPECIFIC past event ("what happened X days ago?"), not the current
