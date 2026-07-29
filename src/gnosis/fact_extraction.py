@@ -29,7 +29,7 @@ from gnosis.graph_query_qa import proxy_model_name
 
 _LOGGER: Final[logging.Logger] = logging.getLogger(__name__)
 
-EXTRACTION_VERSION: Final[str] = "edu-v1"
+EXTRACTION_VERSION: Final[str] = "edu-v1.1"
 
 _EXTRACTION_GUIDE: Final[str] = """
 You are a memory extraction system for a long-term conversational memory
@@ -92,6 +92,17 @@ Requirements:
     "no longer", "just switched from", "replaced") — otherwise null.
     Example: "I used to work at Google, now at Nvidia" →
     supersedes_hint="works-at:Google".
+14. For facts about specific consumer products, devices, or equipment that a
+    speaker owns, bought, or uses: if the product's functional category is not
+    immediately obvious from its name alone, append a brief category hint in
+    parentheses within the unit text. This lets retrieval succeed for both
+    specific queries ("smoker") and category queries ("kitchen appliance").
+    Examples: "The user bought a smoker (a BBQ/outdoor cooking appliance) on
+    2023-03-15.", "The user has a Peloton (a stationary exercise bike).",
+    "The user got a Vitamix (a high-powered blender)." Do NOT annotate
+    self-evident categories (e.g., 'laptop', 'refrigerator', 'headphones' —
+    the category is already clear). Only add annotations you are confident
+    about; never guess a category you do not know.
 
 Return JSON only, in this exact format:
 {"facts": [{"text": "...", "source_turn_ids": [1], "entities": ["..."],
