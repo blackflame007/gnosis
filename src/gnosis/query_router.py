@@ -65,16 +65,20 @@ type QueryRoute = Literal[
 _ROUTER_GUIDE: Final[str] = """
 You classify one memory-retrieval query into exactly one route.
 Routes:
-- temporal: asks when something happened, a date, a duration, an ordering in
-  time, or "how long ago / how many days / how many months" (e.g. "When did
-  Maria adopt the cat?", "How long has Tom worked at the bakery?", "How long
-  had I been running when I finished my first 5K?").
+- temporal: asks WHEN something happened, a specific DATE, elapsed time
+  ("how long ago", "how many days/months ago", "how many days/months since"),
+  or ordering in time (e.g. "When did Maria adopt the cat?", "How long has Tom
+  worked at the bakery?", "How many months have passed since my last visit?",
+  "How long had I been running when I finished my first 5K?").
+  IMPORTANT: Do NOT classify here if the question asks "how many TIMES" or
+  "how many DIFFERENT things" — those are frequency counts, not time offsets;
+  route them to aggregative instead.
 - multi_hop: needs two or more distinct remembered facts chained through a
   bridge entity to answer (e.g. "What instrument does the sister of John's
   coworker play?", "Which city is the company that Ana joined based in?").
-- aggregative: asks for a broad summary, list, or synthesis across many
-  conversations or topics (e.g. "What do they usually talk about?", "List all
-  the hobbies mentioned.").
+- aggregative: asks for a count, frequency, or synthesis across many memories
+  (e.g. "What do they usually talk about?", "List all the hobbies mentioned.",
+  "How many times did I do X?", "How many different Y did I attend?").
 - unanswerable_risk: presupposes or asks about something personal memories
   definitively do not contain — a private/obscure fact that could not
   realistically appear in casual personal conversation
@@ -85,7 +89,8 @@ Routes:
   in memory — choose single_hop, temporal, multi_hop, or aggregative as
   appropriate, NEVER unanswerable_risk. Also prefer temporal over
   unanswerable_risk whenever the query asks how long, when, what date, or how
-  many days/months — those are duration/time questions, not absence questions.
+  many days/months (elapsed time) — those are duration/time questions, not
+  absence questions.
 - single_hop: everything else - one remembered fact answers it directly.
 Choose the single best route. Respond with only the route name.
 """.strip()
