@@ -677,6 +677,17 @@ _CON_ENUMERATION_CLAUSE: Final[str] = (
 _ENUMERATION_CLAUSE_ROUTES: Final[frozenset[str]] = frozenset(
     {"multi_hop", "aggregative"},
 )
+# Temporal conflict resolution clause (GNOSIS_CON_RECENCY_PREFERENCE_ENABLED).
+# LME_S L-11 root cause: when the same fact appears across multiple sessions
+# with different values (e.g. 3 → 4 → 5 Korean restaurants across sessions),
+# the CoN model sometimes picks the wrong one. The base instruction notes
+# contradictions but gives no resolution rule; adding "prefer most recent date"
+# directly fixes the observed failure mode where the model chose "higher and
+# more definitive" (an earlier session's value) over the most recent one.
+_CON_RECENCY_CLAUSE: Final[str] = (
+    " When memories about the same fact give different values or numbers, "
+    "prefer the memory with the most recent date."
+)
 
 @dataclass(frozen=True, slots=True)
 class LongTermFactsContext:
@@ -1195,7 +1206,12 @@ class Neo4jAgentMemoryBackend:
             and decision.route in _ENUMERATION_CLAUSE_ROUTES
         ):
             enumeration_clause = _CON_ENUMERATION_CLAUSE
-        return f"{_CHAIN_OF_NOTE_BASE}{inference_clause}{enumeration_clause}"
+        recency_clause = (
+            _CON_RECENCY_CLAUSE
+            if self._app_settings.gnosis_con_recency_preference_enabled
+            else ""
+        )
+        return f"{_CHAIN_OF_NOTE_BASE}{inference_clause}{recency_clause}{enumeration_clause}"
 
     async def _assess_sufficiency(
         self,

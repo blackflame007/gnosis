@@ -219,6 +219,11 @@ class Settings(BaseSettings):
     # Run 19: enumeration misses persist at full gold coverage - the reader
     # answers with one salient item; this instructs it to list all/count).
     gnosis_con_enumeration_enabled: bool = False
+    # Recency preference clause: when two memories about the same fact give
+    # different values, prefer the more recently-dated one. Targets LME_S
+    # knowledge-update failures where multiple sessions contain different
+    # counts and CoN picks the wrong one (LME_S L-12).
+    gnosis_con_recency_preference_enabled: bool = False
     gnosis_fact_verbatim_expansion_enabled: bool = False
     gnosis_fact_verbatim_expansion_max: int = Field(default=5, ge=1)
     gnosis_fact_extraction_enabled: bool = False
