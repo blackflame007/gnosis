@@ -684,10 +684,22 @@ _ENUMERATION_CLAUSE_ROUTES: Final[frozenset[str]] = frozenset(
 # contradictions but gives no resolution rule; adding "prefer most recent date"
 # directly fixes the observed failure mode where the model chose "higher and
 # more definitive" (an earlier session's value) over the most recent one.
+# L-12 lesson: the clause must (a) override the never-guess rule explicitly
+# ("state that value directly") and (b) be skipped on temporal-routed reads
+# where "most recent fact" ≠ "the specific past event the question asks about".
+# Also adds an anti-extrapolation rule to prevent forward projection from rates
+# (LME_S 1cea1afa: model calculated 600 + 10/week × 17d ≈ 624 from two
+# complementary facts instead of reporting the last known count of 600).
 _CON_RECENCY_CLAUSE: Final[str] = (
     " When memories about the same fact give different values or numbers, "
-    "prefer the memory with the most recent date."
+    "the most recently-dated value is the correct current state — state that "
+    "value directly. Never calculate or project a current value from rates, "
+    "trends, or growth patterns stated in the memories."
 )
+# The recency clause must not fire on temporal-routed reads: temporal questions
+# ask about a SPECIFIC past event ("what happened X days ago?"), not the current
+# state, so preferring the most recent memory is wrong there.
+_RECENCY_CLAUSE_EXCLUDED_ROUTES: Final[frozenset[str]] = frozenset({"temporal"})
 
 @dataclass(frozen=True, slots=True)
 class LongTermFactsContext:
@@ -1209,6 +1221,7 @@ class Neo4jAgentMemoryBackend:
         recency_clause = (
             _CON_RECENCY_CLAUSE
             if self._app_settings.gnosis_con_recency_preference_enabled
+            and decision.route not in _RECENCY_CLAUSE_EXCLUDED_ROUTES
             else ""
         )
         return f"{_CHAIN_OF_NOTE_BASE}{inference_clause}{recency_clause}{enumeration_clause}"
