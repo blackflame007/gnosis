@@ -22,24 +22,33 @@ def test_slot_key_conversation_predicates_never_supersede() -> None:
 
 
 def test_drop_superseded_keeps_only_newest_in_slot_by_event_date() -> None:
-    older = FactFreshness(("u", "fact", "biscuit"), "2024-01-01", "2026-01-01")
-    newer = FactFreshness(("u", "fact", "biscuit"), "2024-06-01", "2025-01-01")
+    older = FactFreshness(("u", "fact", "biscuit"), event_date="2024-01-01", observation_date=None, created_at="2026-01-01")
+    newer = FactFreshness(("u", "fact", "biscuit"), event_date="2024-06-01", observation_date=None, created_at="2025-01-01")
     kept, dropped = drop_superseded([older, newer], lambda item: item)
     assert kept == [newer]
     assert dropped == 1
 
 
-def test_drop_superseded_falls_back_to_created_at_without_event_dates() -> None:
-    older = FactFreshness(("u", "lives_in"), None, "2023-05-07T00:00:00Z")
-    newer = FactFreshness(("u", "lives_in"), None, "2026-06-28T00:00:00Z")
+def test_drop_superseded_uses_observation_date_without_event_dates() -> None:
+    # observation_date (conversation_date) used as recency when no event_date
+    older = FactFreshness(("u", "lives_in"), event_date=None, observation_date="2023-05-01", created_at="2026-01-01T00:00:00Z")
+    newer = FactFreshness(("u", "lives_in"), event_date=None, observation_date="2024-03-01", created_at="2026-01-01T00:00:00Z")
+    kept, dropped = drop_superseded([newer, older], lambda item: item)
+    assert kept == [newer]
+    assert dropped == 1
+
+
+def test_drop_superseded_falls_back_to_created_at_without_event_or_observation_dates() -> None:
+    older = FactFreshness(("u", "lives_in"), event_date=None, observation_date=None, created_at="2023-05-07T00:00:00Z")
+    newer = FactFreshness(("u", "lives_in"), event_date=None, observation_date=None, created_at="2026-06-28T00:00:00Z")
     kept, dropped = drop_superseded([newer, older], lambda item: item)
     assert kept == [newer]
     assert dropped == 1
 
 
 def test_drop_superseded_keeps_both_on_tie() -> None:
-    first = FactFreshness(("u", "fact", "biscuit"), "2024-01-01", None)
-    second = FactFreshness(("u", "fact", "biscuit"), "2024-01-01", None)
+    first = FactFreshness(("u", "fact", "biscuit"), event_date="2024-01-01", observation_date=None, created_at=None)
+    second = FactFreshness(("u", "fact", "biscuit"), event_date="2024-01-01", observation_date=None, created_at=None)
     kept, dropped = drop_superseded([first, second], lambda item: item)
     assert kept == [first, second]
     assert dropped == 0
@@ -47,24 +56,24 @@ def test_drop_superseded_keeps_both_on_tie() -> None:
 
 def test_drop_superseded_keeps_incomparable_facts() -> None:
     # One has only event_date, the other only created_at: not comparable.
-    dated = FactFreshness(("u", "fact", "biscuit"), "2024-01-01", None)
-    stamped = FactFreshness(("u", "fact", "biscuit"), None, "2026-01-01T00:00:00Z")
+    dated = FactFreshness(("u", "fact", "biscuit"), event_date="2024-01-01", observation_date=None, created_at=None)
+    stamped = FactFreshness(("u", "fact", "biscuit"), event_date=None, observation_date=None, created_at="2026-01-01T00:00:00Z")
     kept, dropped = drop_superseded([dated, stamped], lambda item: item)
     assert kept == [dated, stamped]
     assert dropped == 0
 
 
 def test_drop_superseded_keeps_different_slots() -> None:
-    biscuit = FactFreshness(("u", "fact", "biscuit"), "2024-01-01", None)
-    rex = FactFreshness(("u", "fact", "rex"), "2024-06-01", None)
+    biscuit = FactFreshness(("u", "fact", "biscuit"), event_date="2024-01-01", observation_date=None, created_at=None)
+    rex = FactFreshness(("u", "fact", "rex"), event_date="2024-06-01", observation_date=None, created_at=None)
     kept, dropped = drop_superseded([biscuit, rex], lambda item: item)
     assert kept == [biscuit, rex]
     assert dropped == 0
 
 
 def test_drop_superseded_keeps_facts_without_slot_keys() -> None:
-    plain = FactFreshness(None, "2024-01-01", None)
-    other = FactFreshness(None, "2024-06-01", None)
+    plain = FactFreshness(None, event_date="2024-01-01", observation_date=None, created_at=None)
+    other = FactFreshness(None, event_date="2024-06-01", observation_date=None, created_at=None)
     kept, dropped = drop_superseded([plain, other], lambda item: item)
     assert kept == [plain, other]
     assert dropped == 0
@@ -72,9 +81,9 @@ def test_drop_superseded_keeps_facts_without_slot_keys() -> None:
 
 def test_drop_superseded_collapses_chain_to_single_newest() -> None:
     slot = ("u", "fact", "biscuit")
-    a = FactFreshness(slot, "2024-01-01", None)
-    b = FactFreshness(slot, "2024-03-01", None)
-    c = FactFreshness(slot, "2024-06-01", None)
+    a = FactFreshness(slot, event_date="2024-01-01", observation_date=None, created_at=None)
+    b = FactFreshness(slot, event_date="2024-03-01", observation_date=None, created_at=None)
+    c = FactFreshness(slot, event_date="2024-06-01", observation_date=None, created_at=None)
     kept, dropped = drop_superseded([a, b, c], lambda item: item)
     assert kept == [c]
     assert dropped == 2

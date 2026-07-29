@@ -148,6 +148,7 @@ def fact_freshness(fact: JsonObject) -> FactFreshness:
             _metadata_entities(metadata),
         ),
         event_date=_metadata_event_date(metadata),
+        observation_date=_metadata_observation_date(metadata),
         created_at=created_at if isinstance(created_at, str) and created_at else None,
     )
 
@@ -160,6 +161,7 @@ def memory_freshness(memory: StoredMemory) -> FactFreshness:
             _metadata_entities(memory.metadata),
         ),
         event_date=_metadata_event_date(memory.metadata),
+        observation_date=_metadata_observation_date(memory.metadata),
         created_at=memory.created_at,
     )
 
@@ -235,6 +237,13 @@ def _metadata_event_date(metadata: Mapping[str, JsonValue]) -> str | None:
     event_date = metadata.get("event_date")
     if isinstance(event_date, str) and event_date:
         return event_date
+    return None
+
+
+def _metadata_observation_date(metadata: Mapping[str, JsonValue]) -> str | None:
+    date = metadata.get("date")
+    if isinstance(date, str) and date:
+        return date
     return None
 
 
