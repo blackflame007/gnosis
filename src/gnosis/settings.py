@@ -224,6 +224,15 @@ class Settings(BaseSettings):
     # knowledge-update failures where multiple sessions contain different
     # counts and CoN picks the wrong one (LME_S L-12).
     gnosis_con_recency_preference_enabled: bool = False
+    # Absence-implies-unknown clause: prevents two specific absence-of-evidence
+    # errors that produce wrong answers on LME_S abstention questions.
+    # (1) When no memory mentions an activity, models infer a count of zero
+    # instead of saying "not enough information" (e.g., "zero egg tarts baked"
+    # because baking was never mentioned). (2) When a question compares who
+    # among multiple people did something first/most but only one party's data
+    # exists, models answer from partial data instead of abstaining. LME_S
+    # L-16 targets: 88432d0a_abs, 0ddfec37_abs, gpt4_fe651585_abs.
+    gnosis_con_abstention_enabled: bool = False
     gnosis_fact_verbatim_expansion_enabled: bool = False
     gnosis_fact_verbatim_expansion_max: int = Field(default=5, ge=1)
     gnosis_fact_extraction_enabled: bool = False

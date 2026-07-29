@@ -716,6 +716,30 @@ _CON_RECENCY_CLAUSE: Final[str] = (
 # ask about a SPECIFIC past event ("what happened X days ago?"), not the current
 # state, so preferring the most recent memory is wrong there.
 _RECENCY_CLAUSE_EXCLUDED_ROUTES: Final[frozenset[str]] = frozenset({"temporal"})
+# Absence-implies-unknown clause (GNOSIS_CON_ABSTENTION_ENABLED).
+# LME_S L-15 stable-wrong analysis identified two recurring absence-of-evidence
+# errors on abstention-category questions:
+# (1) "Zero instead of not-enough-info": model correctly notes no memory
+#     mentions an activity but then concludes the count is zero (88432d0a_abs:
+#     "no egg tart baking mentioned → zero times"; 0ddfec37_abs: "no football
+#     records → zero footballs"). The CoN base already says "say you don't know"
+#     but models bypass it by INFERRING zero from absence rather than FINDING zero
+#     in a memory. This clause makes the prohibition concrete.
+# (2) "Partial comparison": model finds data about one party in a who-did-X-first
+#     or who-did-X-more question, but not the other, and answers "Party A first"
+#     instead of abstaining (gpt4_fe651585_abs: Alex's parenting date known,
+#     Tom's unknown → model says "Alex first"). Gold expects "not enough info."
+# No route exclusion: temporal questions ask about confirmed events (activity IS
+# mentioned); the clause fires only when no memory mentions the activity at all,
+# which is not the temporal-question pattern.
+_CON_ABSTENTION_CLAUSE: Final[str] = (
+    " Do not infer that the count of an activity is zero simply because no memory "
+    "mentions it — the user may not have shared those details; say instead that "
+    "you do not have enough information. If the question asks who among two or more "
+    "people did something first, most, or at a specific time, and you only have "
+    "relevant information about some of them and not others, say you do not have "
+    "enough information to make that comparison."
+)
 
 @dataclass(frozen=True, slots=True)
 class LongTermFactsContext:
@@ -1240,7 +1264,12 @@ class Neo4jAgentMemoryBackend:
             and decision.route not in _RECENCY_CLAUSE_EXCLUDED_ROUTES
             else ""
         )
-        return f"{_CHAIN_OF_NOTE_BASE}{inference_clause}{recency_clause}{enumeration_clause}"
+        abstention_clause = (
+            _CON_ABSTENTION_CLAUSE
+            if self._app_settings.gnosis_con_abstention_enabled
+            else ""
+        )
+        return f"{_CHAIN_OF_NOTE_BASE}{inference_clause}{recency_clause}{enumeration_clause}{abstention_clause}"
 
     async def _assess_sufficiency(
         self,
