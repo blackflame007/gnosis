@@ -233,6 +233,13 @@ class Settings(BaseSettings):
     # exists, models answer from partial data instead of abstaining. LME_S
     # L-16 targets: 88432d0a_abs, 0ddfec37_abs, gpt4_fe651585_abs.
     gnosis_con_abstention_enabled: bool = False
+    # Recommendation response clause (GNOSIS_CON_RECOMMENDATION_ENABLED).
+    # LME_S L-19 targets: SSP questions where model describes preferences in
+    # third-person instead of making concrete first/second-person recommendations.
+    # `35a27287` ("Can you recommend cultural events?") and `a89d7624` ("Any
+    # suggestions for Denver?") both fail because the model says "The user would
+    # prefer..." rather than "You might enjoy X or Y."
+    gnosis_con_recommendation_enabled: bool = False
     gnosis_fact_verbatim_expansion_enabled: bool = False
     gnosis_fact_verbatim_expansion_max: int = Field(default=5, ge=1)
     gnosis_fact_extraction_enabled: bool = False

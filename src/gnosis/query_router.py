@@ -172,7 +172,12 @@ class RouteDecision:
             # turns). Aggregative also gets it: LME_S analysis shows exact
             # keyword matching surfaces scattered per-event facts (art events,
             # camping trips) that fall below the dense-only top-20 cut.
-            hybrid_retrieval=route in ("temporal", "aggregative"),
+            # Single_hop added (LME_S L-20): two stable-wrong questions
+            # (0bc8ad93 museum companion, a96c20ee_abs university poster) are
+            # likely single_hop with specific entity/keyword facts that fall
+            # below dense top-20; BM25 should surface them. LOCOMO evidence:
+            # global BM25 was neutral for single_hop (80.5→79.5, Run 6).
+            hybrid_retrieval=route in ("temporal", "aggregative", "single_hop"),
             graphqa_fusion=route == "multi_hop",
             verbatim_expansion=route == "multi_hop",
             abstention_prompt=route == "unanswerable_risk",

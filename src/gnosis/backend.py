@@ -741,6 +741,25 @@ _CON_ABSTENTION_CLAUSE: Final[str] = (
     "enough information to make that comparison."
 )
 
+# Recommendation-response clause (GNOSIS_CON_RECOMMENDATION_ENABLED).
+# LME_S L-17 stable-wrong analysis: SSP questions ("Can you recommend cultural
+# events?", "Any suggestions for Denver?") fail because the model describes the
+# user's preferences in the third person ("The user would prefer responses that
+# suggest...") instead of making concrete first/second-person recommendations.
+# Root cause: the model treats these as meta-questions about response preferences
+# rather than as requests to actually recommend based on recalled preferences.
+# The hypothesis evidence confirms the model finds the right memories (assistant
+# previously suggested language festivals / Denver attractions) but then pivots
+# to a preference-profile format. This clause redirects the final answer shape.
+_CON_RECOMMENDATION_CLAUSE: Final[str] = (
+    " When the question asks you to recommend, suggest, or advise (e.g. 'Can you "
+    "recommend...', 'Any suggestions for...', 'What should I...'), respond with "
+    "concrete suggestions derived from the memories. Do not describe what the user "
+    "would prefer in the third person; instead, make actual recommendations in "
+    "first or second person (e.g. 'You might enjoy X' or 'I’d suggest Y') "
+    "based on what the memories reveal about their interests and past experiences."
+)
+
 @dataclass(frozen=True, slots=True)
 class LongTermFactsContext:
     context: str = ""
@@ -1269,7 +1288,12 @@ class Neo4jAgentMemoryBackend:
             if self._app_settings.gnosis_con_abstention_enabled
             else ""
         )
-        return f"{_CHAIN_OF_NOTE_BASE}{inference_clause}{recency_clause}{enumeration_clause}{abstention_clause}"
+        recommendation_clause = (
+            _CON_RECOMMENDATION_CLAUSE
+            if self._app_settings.gnosis_con_recommendation_enabled
+            else ""
+        )
+        return f"{_CHAIN_OF_NOTE_BASE}{inference_clause}{recency_clause}{enumeration_clause}{abstention_clause}{recommendation_clause}"
 
     async def _assess_sufficiency(
         self,
