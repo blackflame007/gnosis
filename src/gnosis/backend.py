@@ -690,11 +690,18 @@ _ENUMERATION_CLAUSE_ROUTES: Final[frozenset[str]] = frozenset(
 # Also adds an anti-extrapolation rule to prevent forward projection from rates
 # (LME_S 1cea1afa: model calculated 600 + 10/week × 17d ≈ 624 from two
 # complementary facts instead of reporting the last known count of 600).
+# L-13 lesson: "the same fact" was too loose — the model conflated related-but-
+# different facts (baseball ↔ football, guitar ↔ violin) and fired the clause
+# when it shouldn't. Anchoring to "the same specific fact the question is asking
+# about" prevents this. Also added "unless the question asks about a past or
+# initial state" to stop the clause from overriding correctly-retrieved initial
+# values when the question uses words like "initially", "originally", "at first".
 _CON_RECENCY_CLAUSE: Final[str] = (
-    " When memories about the same fact give different values or numbers, "
-    "the most recently-dated value is the correct current state — state that "
-    "value directly. Never calculate or project a current value from rates, "
-    "trends, or growth patterns stated in the memories."
+    " When memories give conflicting values for the same specific fact the "
+    "question is asking about, the most recently-dated value is the correct "
+    "current state — state that value directly, unless the question asks about "
+    "a past or initial state. Never calculate or project a current value from "
+    "rates, trends, or growth patterns stated in the memories."
 )
 # The recency clause must not fire on temporal-routed reads: temporal questions
 # ask about a SPECIFIC past event ("what happened X days ago?"), not the current
