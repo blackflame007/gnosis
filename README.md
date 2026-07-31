@@ -25,13 +25,13 @@ prompt-safe sections for agent consumption.
 ## Quick start
 
 The tracked [`compose.yaml`](compose.yaml) starts Neo4j 5.26+ and the published
-`ghcr.io/nolgiainc/gnosis:latest` image. You need Docker Compose v2 and an
+`ghcr.io/blackflame007/gnosis:latest` image. You need Docker Compose v2 and an
 OpenAI-compatible chat/embedding endpoint. The default compose points at Ollama on
 the host; set variables (or a `.env` next to the file) for LiteLLM, OpenAI, or
 another endpoint.
 
 ```bash
-git clone https://github.com/nolgiainc/gnosis.git
+git clone https://github.com/blackflame007/gnosis.git
 cd gnosis
 ollama pull llama3.2:latest
 ollama pull nomic-embed-text
@@ -178,7 +178,27 @@ uv run uvicorn gnosis.main:app --host localhost --port 8080
 
 ## Benchmark standing
 
-Full-LOCOMO (all 10 conversations, Run 23, 2026-07-04), GPT-5.5 judge:
+### LongMemEval_S — L-23 (full 500-Q, 2026-07-31), Claude-Sonnet-4-6 backbone + judge
+
+| Category | gnosis L-23 | Zep | mem0 | Chronos (SOTA) |
+|---|---|---|---|---|
+| abstention | **100.0%** (n=30) | — | — | — |
+| single-session-preference | **96.7%** (n=30) | — | — | — |
+| single-session-user | **87.5%** (n=64) | — | — | — |
+| temporal-reasoning | **82.7%** (n=127) | 62.4% | — | 95.5% |
+| multi-session | 73.6% (n=121) | 57.9% | — | 88.7% |
+| single-session-assistant | 41.1% (n=56) | — | — | — |
+| knowledge-update | 23.6% (n=72) | 83.3% | — | **100%** |
+| **Overall** | **69.8%** (500 Q) | 71.2% | 67.6% | 95.6% |
+
+*Note: L-23 uses Claude-Sonnet-4-6 as both backbone and judge; Zep/mem0 use GPT-4o. Scores are directionally comparable but not identical-protocol.*
+
+**Key findings from L-23:**
+- Recall on user-stated facts is strong: SSU 87.5%, SSP 96.7%, abstention 100%.
+- **Knowledge-update (23.6%) is the primary gap.** Gnosis returns stale facts instead of the most recent update. Root cause: no SUPERSEDES edge between old and new facts; similarity scores rank both equally. Fix: L-24 (event calendar + explicit supersession edges). See [docs/knowledge-update.md (gnosis-membench)](https://github.com/blackflame007/gnosis-membench/blob/main/docs/knowledge-update.md).
+- **Single-session-assistant (41.1%) is a secondary gap.** The edu-v1 extractor focuses on user-stated facts; assistant commitments and stated facts are under-indexed.
+
+### LOCOMO — Run 23 (full 10-conversation, 2026-07-04), GPT-5.5 judge
 
 | Category | gnosis | mem0 | mem0-graph | Zep |
 |---|---|---|---|---|
@@ -189,15 +209,11 @@ Full-LOCOMO (all 10 conversations, Run 23, 2026-07-04), GPT-5.5 judge:
 | adversarial J | **83.9** | — | — | — |
 | **excl-adv J** | **66.9–68.9** | 66.88 | 68.44 | 65.99 |
 
-Open-domain is the primary gap (29.2 vs frontier ~74–77). The community graph
-feature (`GNOSIS_COMMUNITY_GRAPH_ENABLED`) targets this gap with cluster-level
-summaries. Multi-query rewrite (`GNOSIS_QUERY_REWRITE_ENABLED`) targets multi-hop
-via entity pivot expansion.
+Open-domain is the primary LOCOMO gap (29.2 vs frontier ~74–77). The community graph
+feature (`GNOSIS_COMMUNITY_GRAPH_ENABLED`) targets this gap with cluster-level summaries.
 
-Primary benchmark target: **LongMemEval_S** (500 questions, stable judge, 5 ability
-axes including knowledge-update and abstention that LOCOMO lacks). Baseline L-0 in
-progress. See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) and
-[gnosis-membench RESULTS.md](https://github.com/nolgiainc/gnosis-membench/blob/main/RESULTS.md).
+See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) and
+[gnosis-membench RESULTS.md](https://github.com/blackflame007/gnosis-membench/blob/main/RESULTS.md) for the full run ledger.
 
 ## Development
 
@@ -221,7 +237,7 @@ quality claims.
 - [`compose.yaml`](compose.yaml): minimal Neo4j + service stack for local use.
   Not a production topology or secret-management system.
 - [`.github/workflows/ci.yml`](.github/workflows/ci.yml): test gate on PRs; push
-  to `main` also builds and publishes `ghcr.io/nolgiainc/gnosis:latest`.
+  to `main` also builds and publishes `ghcr.io/blackflame007/gnosis:latest`.
 
 Kubernetes, ingress, secret management, and rollout policy are owned by your
 deployment environment. Keep all credentials and token classes in environment
@@ -229,7 +245,7 @@ secret-backed configuration.
 
 ## Related projects
 
-- [gnosis-membench](https://github.com/nolgiainc/gnosis-membench) — benchmark
+- [gnosis-membench](https://github.com/blackflame007/gnosis-membench) — benchmark
   harness for LOCOMO and LongMemEval experiments.
-- [hermes-gnosis](https://github.com/nolgiainc/hermes-gnosis) — memory-provider
+- [hermes-gnosis](https://github.com/blackflame007/hermes-gnosis) — memory-provider
   plugin for NousResearch Hermes agents.
