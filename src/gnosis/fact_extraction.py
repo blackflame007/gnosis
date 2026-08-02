@@ -14,7 +14,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
-from typing import ClassVar, Final, Protocol
+from typing import ClassVar, Final, Literal, Protocol
 
 from openai import AsyncOpenAI, OpenAIError
 from openai.types.chat import (
@@ -29,7 +29,7 @@ from gnosis.graph_query_qa import proxy_model_name
 
 _LOGGER: Final[logging.Logger] = logging.getLogger(__name__)
 
-EXTRACTION_VERSION: Final[str] = "edu-v1"
+EXTRACTION_VERSION: Final[str] = "edu-v1.1"
 
 _EXTRACTION_GUIDE: Final[str] = """
 You are a memory extraction system for a long-term conversational memory
@@ -81,10 +81,33 @@ Requirements:
     links, code blocks, or attachments only as described by the speakers.
 11. Write units in the same language as the conversation.
 12. If the NEW turns contain nothing substantive, return an empty list.
+13. For each unit, set temporal_state to one of: "starts" (a state just
+    beginning: "I just started at Nvidia", "We moved to Austin"), "ends"
+    (a state ending: "I quit my job at Google", "I finished my PhD"),
+    "ongoing" (a state currently true with no known end: "I live in Austin",
+    "I work at Nvidia"), "point_in_time" (a one-off event, not a state
+    change: "We had dinner last Tuesday"), or "unknown" (default when
+    unclear). Set supersedes_hint to a brief label for what this fact
+    replaces ONLY when the text explicitly signals a change ("used to",
+    "no longer", "just switched from", "replaced") — otherwise null.
+    Example: "I used to work at Google, now at Nvidia" →
+    supersedes_hint="works-at:Google".
+14. For facts about specific consumer products, devices, or equipment that a
+    speaker owns, bought, or uses: if the product's functional category is not
+    immediately obvious from its name alone, append a brief category hint in
+    parentheses within the unit text. This lets retrieval succeed for both
+    specific queries ("smoker") and category queries ("kitchen appliance").
+    Examples: "The user bought a smoker (a BBQ/outdoor cooking appliance) on
+    2023-03-15.", "The user has a Peloton (a stationary exercise bike).",
+    "The user got a Vitamix (a high-powered blender)." Do NOT annotate
+    self-evident categories (e.g., 'laptop', 'refrigerator', 'headphones' —
+    the category is already clear). Only add annotations you are confident
+    about; never guess a category you do not know.
 
 Return JSON only, in this exact format:
-{"facts": [{"text": "...", "source_turn_ids": [1],
-            "entities": ["..."], "event_date": "YYYY-MM-DD" | null}]}
+{"facts": [{"text": "...", "source_turn_ids": [1], "entities": ["..."],
+            "event_date": "YYYY-MM-DD" | null,
+            "temporal_state": "unknown", "supersedes_hint": null}]}
 """.strip()
 
 # Entity-graph addendum (arXiv 2405.14831 HippoRAG / Graphiti OpenIE): when
@@ -104,6 +127,7 @@ named entities, and never relate an entity to itself. Return an empty list
 when the unit states no such relationship. So each fact object is:
 {"text": "...", "source_turn_ids": [1], "entities": ["..."],
  "event_date": "YYYY-MM-DD" | null,
+ "temporal_state": "unknown", "supersedes_hint": null,
  "relations": [{"head": "...", "relation": "...", "tail": "..."}]}
 """.strip()
 
@@ -139,14 +163,17 @@ _EXEMPLAR_OUTPUT: Final[str] = (
     '{"text": "Alice presented her robotics work at the International '
     'Robotics Symposium in Tokyo.", "source_turn_ids": [3], '
     '"entities": ["Alice", "International Robotics Symposium", "Tokyo"], '
-    '"event_date": null}, '
+    '"event_date": null, "temporal_state": "point_in_time", '
+    '"supersedes_hint": null}, '
     '{"text": "Alice was invited by the International Robotics Symposium '
     "organizers to give a keynote at the symposium's next edition in Osaka "
     'in April 2024.", "source_turn_ids": [3, 5], '
     '"entities": ["Alice", "International Robotics Symposium", "Osaka"], '
-    '"event_date": "2024-04-01"}, '
+    '"event_date": "2024-04-01", "temporal_state": "point_in_time", '
+    '"supersedes_hint": null}, '
     '{"text": "Bob hates long flights.", "source_turn_ids": [6], '
-    '"entities": ["Bob"], "event_date": null}'
+    '"entities": ["Bob"], "event_date": null, "temporal_state": "ongoing", '
+    '"supersedes_hint": null}'
     "]}"
 )
 
@@ -158,18 +185,21 @@ _RELATIONAL_EXEMPLAR_OUTPUT: Final[str] = (
     '{"text": "Alice presented her robotics work at the International '
     'Robotics Symposium in Tokyo.", "source_turn_ids": [3], '
     '"entities": ["Alice", "International Robotics Symposium", "Tokyo"], '
-    '"event_date": null, "relations": [{"head": "Alice", '
+    '"event_date": null, "temporal_state": "point_in_time", '
+    '"supersedes_hint": null, "relations": [{"head": "Alice", '
     '"relation": "presented at", '
     '"tail": "International Robotics Symposium"}]}, '
     '{"text": "Alice was invited by the International Robotics Symposium '
     "organizers to give a keynote at the symposium's next edition in Osaka "
     'in April 2024.", "source_turn_ids": [3, 5], '
     '"entities": ["Alice", "International Robotics Symposium", "Osaka"], '
-    '"event_date": "2024-04-01", "relations": [{"head": "Alice", '
+    '"event_date": "2024-04-01", "temporal_state": "point_in_time", '
+    '"supersedes_hint": null, "relations": [{"head": "Alice", '
     '"relation": "invited by", '
     '"tail": "International Robotics Symposium"}]}, '
     '{"text": "Bob hates long flights.", "source_turn_ids": [6], '
-    '"entities": ["Bob"], "event_date": null, "relations": []}'
+    '"entities": ["Bob"], "event_date": null, "temporal_state": "ongoing", '
+    '"supersedes_hint": null, "relations": []}'
     "]}"
 )
 
@@ -196,6 +226,10 @@ class MemoryUnit(BaseModel):
     source_turn_ids: list[int] = Field(default_factory=list)
     entities: list[str] = Field(default_factory=list)
     event_date: str | None = None
+    temporal_state: Literal["point_in_time", "starts", "ends", "ongoing", "unknown"] = (
+        "unknown"
+    )
+    supersedes_hint: str | None = None
 
 
 class FactRelation(BaseModel):

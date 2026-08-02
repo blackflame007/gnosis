@@ -2,6 +2,32 @@
 
 Mirror of the canonical log in [gnosis-membench/RESULTS.md](https://github.com/nolgiainc/gnosis-membench/blob/main/RESULTS.md); the harness repo is the source of truth for new runs.
 
+> **LongMemEval_S L-23 (full 500-Q, 2026-07-31).** First full LME_S run.
+> Claude-Sonnet-4-6 as both backbone (queries gnosis `/v1/memory/context`) and judge
+> (official per-type LME judge prompts). All 500 conversations ingested via membench
+> ingest pipeline; results in gnosis-membench `results/longmemeval_s/L-23-claude-backbone/`.
+>
+> | Category | gnosis L-23 | Zep | mem0 | Chronos (SOTA) |
+> |---|---|---|---|---|
+> | abstention | **100.0%** (n=30) | — | — | — |
+> | single-session-preference | **96.7%** (n=30) | — | — | — |
+> | single-session-user | **87.5%** (n=64) | — | — | — |
+> | temporal-reasoning | **82.7%** (n=127) | 62.4% | — | 95.5% |
+> | multi-session | 73.6% (n=121) | 57.9% | — | 88.7% |
+> | single-session-assistant | 41.1% (n=56) | — | — | — |
+> | knowledge-update | 23.6% (n=72) | 83.3% | — | **100%** |
+> | **Overall** | **69.8%** (500 Q) | 71.2% | 67.6% | 95.6% |
+>
+> *Note: judge protocol differs — L-23 uses Claude-Sonnet-4-6; Zep/mem0 use GPT-4o.
+> Scores are directionally comparable but not on identical protocols.*
+>
+> Primary gaps identified: **knowledge-update (23.6%)** — stale facts returned;
+> no SUPERSEDES edges in graph; fix is L-24 (event calendar + explicit supersession).
+> **Single-session-assistant (41.1%)** — edu-v1 extractor misses assistant-side
+> commitments; fix is extractor prompt update (L-25).
+>
+> ---
+>
 > **Full-LOCOMO standing (Run 23, 2026-07-04).** The Run 1–22 trajectory
 > below was measured on **subset 3** (3 of 10 conversations, 497 Q) — a fast
 > dev-loop gate, not comparable-n to published systems. **Run 23** is the
@@ -25,6 +51,11 @@ Mirror of the canonical log in [gnosis-membench/RESULTS.md](https://github.com/n
 > **adversarial** (judge-robust J), **multi-hop on the judge-independent F1**.
 > Genuine weakness: **open-domain**. Full detail in the Run 23 section of
 > RESULTS.md.
+>
+> **LongMemEval_S competitive context (2026-07-31):** agentmemory 96.2%,
+> Chronos (PwC) 95.60% with 100% knowledge-update, Mastra OM 94.87%.
+> Gnosis L-23: 69.8%. Next experiments target KU (L-24) and SSA (L-25).
+> See gnosis-membench `RESULTS.md` and `docs/frontier-2026.md`.
 
 
 Canonical record of all gnosis memory-quality benchmark runs. Every run uses the

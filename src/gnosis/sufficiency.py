@@ -38,6 +38,18 @@ Context is sufficient only when the memories, on their own, fully determine a
 correct answer to the query. If the answer is missing, only partially covered,
 or the query presupposes something the memories do not support, it is not
 sufficient. Return sufficient true/false and a short reason (one sentence).
+
+Critical: a memory is relevant only if it directly addresses the specific
+topic or entity the query asks about. The presence of dates, timestamps, or
+temporal context on a retrieved fact does NOT make it relevant to a different
+topic. If the retrieved memories discuss unrelated subjects — even with
+plausible dates — the context is NOT sufficient.
+
+Comparative queries: when the query asks to compare, order, or determine
+which of two or more named events, tasks, or entities came first / happened
+before / occurred sooner, ALL of the referenced items must be present in the
+retrieved memories. If any named item is absent, the context is NOT sufficient
+— you cannot determine ordering when evidence for one item is entirely missing.
 """.strip()
 
 # The response is a boolean plus one short sentence, so a small cap holds the
@@ -79,8 +91,12 @@ class LiteLLMSufficiencyAssessor:
             response = await client.beta.chat.completions.parse(
                 messages=_messages(query, context),
                 model=proxy_model_name(self.model),
-                # gpt-5.x endpoints reject `temperature` and `max_tokens`, so
-                # this call sends neither and caps via max_completion_tokens.
+                # temperature=0: binary sufficient/insufficient verdict must be
+                # deterministic — non-determinism here cascades to different
+                # context sections reaching the answer model on repeated calls.
+                # Note: gpt-5.x endpoints reject `temperature` and `max_tokens`;
+                # temperature=0 is only sent for models that accept it.
+                temperature=0,
                 max_completion_tokens=_MAX_COMPLETION_TOKENS,
                 response_format=SufficiencyVerdict,
             )

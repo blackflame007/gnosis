@@ -219,6 +219,27 @@ class Settings(BaseSettings):
     # Run 19: enumeration misses persist at full gold coverage - the reader
     # answers with one salient item; this instructs it to list all/count).
     gnosis_con_enumeration_enabled: bool = False
+    # Recency preference clause: when two memories about the same fact give
+    # different values, prefer the more recently-dated one. Targets LME_S
+    # knowledge-update failures where multiple sessions contain different
+    # counts and CoN picks the wrong one (LME_S L-12).
+    gnosis_con_recency_preference_enabled: bool = False
+    # Absence-implies-unknown clause: prevents two specific absence-of-evidence
+    # errors that produce wrong answers on LME_S abstention questions.
+    # (1) When no memory mentions an activity, models infer a count of zero
+    # instead of saying "not enough information" (e.g., "zero egg tarts baked"
+    # because baking was never mentioned). (2) When a question compares who
+    # among multiple people did something first/most but only one party's data
+    # exists, models answer from partial data instead of abstaining. LME_S
+    # L-16 targets: 88432d0a_abs, 0ddfec37_abs, gpt4_fe651585_abs.
+    gnosis_con_abstention_enabled: bool = False
+    # Recommendation response clause (GNOSIS_CON_RECOMMENDATION_ENABLED).
+    # LME_S L-19 targets: SSP questions where model describes preferences in
+    # third-person instead of making concrete first/second-person recommendations.
+    # `35a27287` ("Can you recommend cultural events?") and `a89d7624` ("Any
+    # suggestions for Denver?") both fail because the model says "The user would
+    # prefer..." rather than "You might enjoy X or Y."
+    gnosis_con_recommendation_enabled: bool = False
     gnosis_fact_verbatim_expansion_enabled: bool = False
     gnosis_fact_verbatim_expansion_max: int = Field(default=5, ge=1)
     gnosis_fact_extraction_enabled: bool = False
@@ -231,6 +252,20 @@ class Settings(BaseSettings):
     gnosis_prompt_preferences_enabled: bool = False
     gnosis_prompt_reasoning_enabled: bool = False
     gnosis_consolidation_schedule_enabled: bool = False
+    # Community subgraph: detect connected-component clusters among :Entity nodes
+    # per scope, generate LLM summaries, persist as :Community nodes. Closes the
+    # open-domain gap (~30 pp vs pure entity retrieval, per Zep/Graphiti analysis).
+    # Rebuilt via POST /v1/communities/rebuild or the consolidation schedule.
+    # Read path adds community summaries to aggregative/open-domain-routed queries.
+    gnosis_community_graph_enabled: bool = False
+    gnosis_community_min_entities: int = Field(default=3, ge=2, le=50)
+    gnosis_community_context_limit: int = Field(default=5, ge=1, le=20)
+    # Multi-query rewrite: when the sufficiency check fires (context insufficient),
+    # generate up to 3 complementary queries and RRF-fuse with the original results.
+    # EverMemOS fires on 31% of queries; expected multi-hop and open-domain gains.
+    # Requires gnosis_sufficiency_check_enabled=true to trigger.
+    gnosis_query_rewrite_enabled: bool = False
+    gnosis_query_rewrite_model: str = ""
     gnosis_memory_edit_enabled: bool = False
     gnosis_mcp_enabled: bool = False
     gnosis_mcp_agent_id: str = Field(default="mcp-client", min_length=1)

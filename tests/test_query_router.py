@@ -51,6 +51,8 @@ def test_unrouted_decision_mirrors_global_flags() -> None:
         gnosis_bridge_traversal_enabled=True,
         gnosis_chain_of_note_enabled=True,
         gnosis_coverage_budget_multiplier=2,
+        gnosis_read_supersession_enabled=True,
+        gnosis_sufficiency_check_enabled=True,
     )
 
     # When: the unrouted decision is derived.
@@ -67,6 +69,8 @@ def test_unrouted_decision_mirrors_global_flags() -> None:
         bridge_traversal=True,
         chain_of_note=True,
         budget_multiplier=2,
+        supersession_enabled=True,
+        sufficiency_check_enabled=True,
     )
 
 
@@ -82,6 +86,8 @@ def test_unrouted_decision_defaults_all_off() -> None:
         bridge_traversal=False,
         chain_of_note=False,
         budget_multiplier=1,
+        supersession_enabled=False,
+        sufficiency_check_enabled=False,
     )
 
 
@@ -101,6 +107,8 @@ def test_unrouted_decision_defaults_all_off() -> None:
                 bridge_traversal=False,
                 chain_of_note=False,
                 budget_multiplier=1,
+                supersession_enabled=False,
+                sufficiency_check_enabled=False,
             ),
         ),
         # multi-hop gets the graph traversal route plus verbatim expansion
@@ -118,6 +126,8 @@ def test_unrouted_decision_defaults_all_off() -> None:
                 bridge_traversal=False,
                 chain_of_note=False,
                 budget_multiplier=1,
+                supersession_enabled=False,
+                sufficiency_check_enabled=False,
             ),
         ),
         # the abstention prompt is quarantined to unanswerable-risk queries
@@ -134,14 +144,18 @@ def test_unrouted_decision_defaults_all_off() -> None:
                 bridge_traversal=False,
                 chain_of_note=False,
                 budget_multiplier=1,
+                supersession_enabled=False,
+                sufficiency_check_enabled=False,
             ),
         ),
-        # single-hop peaked on the plain dense extraction store (Run 5).
+        # single-hop peaked on the plain dense extraction store (Run 5), but
+        # LME_S L-20 added hybrid BM25 to surface specific entity/keyword
+        # facts that fall below the dense top-20 cut.
         (
             "single_hop",
             RouteDecision(
                 route="single_hop",
-                hybrid_retrieval=False,
+                hybrid_retrieval=True,
                 graphqa_fusion=False,
                 verbatim_expansion=False,
                 abstention_prompt=False,
@@ -149,14 +163,17 @@ def test_unrouted_decision_defaults_all_off() -> None:
                 bridge_traversal=False,
                 chain_of_note=False,
                 budget_multiplier=1,
+                supersession_enabled=False,
+                sufficiency_check_enabled=False,
             ),
         ),
-        # no measured winner for aggregative/open-domain yet: plain dense.
+        # aggregative reads with hybrid BM25: exact keyword matching surfaces
+        # the scattered per-event facts a dense-only top-20 cut drops.
         (
             "aggregative",
             RouteDecision(
                 route="aggregative",
-                hybrid_retrieval=False,
+                hybrid_retrieval=True,
                 graphqa_fusion=False,
                 verbatim_expansion=False,
                 abstention_prompt=False,
@@ -164,6 +181,8 @@ def test_unrouted_decision_defaults_all_off() -> None:
                 bridge_traversal=False,
                 chain_of_note=False,
                 budget_multiplier=1,
+                supersession_enabled=False,
+                sufficiency_check_enabled=False,
             ),
         ),
     ],

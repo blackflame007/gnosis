@@ -71,7 +71,12 @@ _FACT_SCOPE_FIELDS = {
 }
 
 # Temporal anchor for rendered facts: a stored date tag wins over created_at.
-_FACT_DATE_METADATA_KEYS = ("session_date", "date")
+# Priority: session_date (caller-supplied) > event_date (LLM-extracted specific
+# event date) > date (conversation_date stored at ingest as observation anchor) >
+# created_at (ingest timestamp — wrong for temporal reasoning; last resort only).
+# event_date was previously missing from this tuple, causing every extracted fact
+# to render with the ingest date instead of the date the event actually occurred.
+_FACT_DATE_METADATA_KEYS = ("session_date", "event_date", "date")
 
 
 async def query_recent_facts(
@@ -143,6 +148,7 @@ def fact_freshness(fact: JsonObject) -> FactFreshness:
             _metadata_entities(metadata),
         ),
         event_date=_metadata_event_date(metadata),
+        observation_date=_metadata_observation_date(metadata),
         created_at=created_at if isinstance(created_at, str) and created_at else None,
     )
 
@@ -155,6 +161,7 @@ def memory_freshness(memory: StoredMemory) -> FactFreshness:
             _metadata_entities(memory.metadata),
         ),
         event_date=_metadata_event_date(memory.metadata),
+        observation_date=_metadata_observation_date(memory.metadata),
         created_at=memory.created_at,
     )
 
@@ -230,6 +237,13 @@ def _metadata_event_date(metadata: Mapping[str, JsonValue]) -> str | None:
     event_date = metadata.get("event_date")
     if isinstance(event_date, str) and event_date:
         return event_date
+    return None
+
+
+def _metadata_observation_date(metadata: Mapping[str, JsonValue]) -> str | None:
+    date = metadata.get("date")
+    if isinstance(date, str) and date:
+        return date
     return None
 
 

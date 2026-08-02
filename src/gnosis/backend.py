@@ -5,7 +5,7 @@ import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, cast
 from uuid import UUID, uuid4
 
 from neo4j.exceptions import Neo4jError
@@ -19,6 +19,7 @@ from pydantic import TypeAdapter, ValidationError
 from gnosis.backend_protocols import (
     BackendCapabilityUnavailable,
     BackendRequestError,
+    CommunityCapableBackend,
     ExtractionPreviewBackend,
     MemoryBackend,
     MemoryNotFoundError,
@@ -30,6 +31,31 @@ from gnosis.bridge_traversal import (
     LiteLLMBridgeNamer,
     bridge_parameters,
     parse_bridge_names,
+)
+from gnosis.community_graph import (
+    COMMUNITY_FACT_CAP as _COMMUNITY_FACT_CAP,
+)
+from gnosis.community_graph import (
+    CREATE_COMMUNITY_INDEX_CYPHER as _CREATE_COMMUNITY_INDEX_CYPHER,
+)
+from gnosis.community_graph import (
+    FETCH_COMMUNITY_SUMMARIES_CYPHER as _FETCH_COMMUNITY_SUMMARIES_CYPHER,
+)
+from gnosis.community_graph import (
+    FETCH_ENTITIES_CYPHER as _FETCH_ENTITIES_CYPHER,
+)
+from gnosis.community_graph import (
+    FETCH_ENTITY_FACTS_CYPHER as _FETCH_ENTITY_FACTS_CYPHER,
+)
+from gnosis.community_graph import (
+    FETCH_RELATIONS_CYPHER as _FETCH_RELATIONS_CYPHER,
+)
+from gnosis.community_graph import (
+    CommunityRecord,
+    community_id_for,
+    community_write_statements,
+    summarize_community,
+    weakly_connected_components,
 )
 from gnosis.context_assembly import (
     MEMORY_SEARCH_CANDIDATE_LIMIT as _MEMORY_SEARCH_CANDIDATE_LIMIT,
@@ -303,6 +329,8 @@ from gnosis.models import (
     ClientEvent,
     ClientEventBatchRequest,
     ClientEventBatchResponse,
+    CommunityRebuildRequest,
+    CommunityRebuildResponse,
     ConsolidationApplyRequest,
     ConsolidationApplyResponse,
     ConsolidationDryRunRequest,
@@ -387,7 +415,13 @@ from gnosis.models import (
     SkillUsage,
     SufficiencyAssessment,
 )
-from gnosis.query_router import LiteLLMQueryRouter, QueryRouter, RouteDecision
+from gnosis.query_rewrite import LiteLLMQueryRewriter
+from gnosis.query_router import (
+    LiteLLMQueryRouter,
+    QueryRoute,
+    QueryRouter,
+    RouteDecision,
+)
 from gnosis.reasoning_support import (
     REASONING_READ_UNAVAILABLE_DETAIL as _REASONING_READ_UNAVAILABLE_DETAIL,
 )
@@ -507,12 +541,16 @@ from gnosis.sufficiency import (
 )
 from gnosis.supersession import drop_superseded
 
+if TYPE_CHECKING:
+    from gnosis.graph_types import CypherParameters
+
 __all__ = [
     "BackendCapabilityUnavailable",
     "BackendRequestError",
     "BufferErrorCapableMemoryClient",
     "BufferFlushCapableMemoryClient",
     "BufferPendingCapableMemoryClient",
+    "CommunityCapableBackend",
     "ConsolidationCapableMemoryClient",
     "ConsolidationDryRunState",
     "ConsolidationIdempotencyRecord",
@@ -644,6 +682,88 @@ _CON_ENUMERATION_CLAUSE: Final[str] = (
 _ENUMERATION_CLAUSE_ROUTES: Final[frozenset[str]] = frozenset(
     {"multi_hop", "aggregative"},
 )
+# Temporal conflict resolution clause (GNOSIS_CON_RECENCY_PREFERENCE_ENABLED).
+# LME_S L-11 root cause: when the same fact appears across multiple sessions
+# with different values (e.g. 3 → 4 → 5 Korean restaurants across sessions),
+# the CoN model sometimes picks the wrong one. The base instruction notes
+# contradictions but gives no resolution rule; adding "prefer most recent date"
+# directly fixes the observed failure mode where the model chose "higher and
+# more definitive" (an earlier session's value) over the most recent one.
+# L-12 lesson: the clause must (a) override the never-guess rule explicitly
+# ("state that value directly") and (b) be skipped on temporal-routed reads
+# where "most recent fact" ≠ "the specific past event the question asks about".
+# Also adds an anti-extrapolation rule to prevent forward projection from rates
+# (LME_S 1cea1afa: model calculated 600 + 10/week x 17d ~= 624 from two
+# complementary facts instead of reporting the last known count of 600).
+# L-13 lesson: "the same fact" was too loose — the model conflated related-but-
+# different facts (baseball ↔ football, guitar ↔ violin) and fired the clause
+# when it shouldn't. Anchoring to "the same specific fact the question is asking
+# about" prevents this. Also added "unless the question asks about a past or
+# initial state" to stop the clause from overriding correctly-retrieved initial
+# values when the question uses words like "initially", "originally", "at first".
+# L-14 lesson: "same specific fact the question is asking about" was STILL not
+# tight enough — GPT-4o treated "guitar practice time" as the same specific fact
+# as "violin practice time" because both are "daily practice time." The fix is to
+# restructure the clause so it fires ONLY on memories already identified as
+# relevant. In L-9/L-12 (without strong clause), GPT-4o correctly filtered guitar
+# memories as non-relevant to a violin question; the "state that value directly"
+# override then bypassed that correct judgment. By leading with "among the
+# memories you've identified as relevant," the model applies its own relevance
+# filter first, and the recency rule is confined to that already-filtered set.
+_CON_RECENCY_CLAUSE: Final[str] = (
+    " Among the memories you have identified as relevant above, if two or more "
+    "give different values for the same fact, the most recently-dated value is "
+    "the correct current state — state it directly as your answer, unless the "
+    "question asks about a past or initial state. Never calculate or project a "
+    "current value from rates, trends, or growth patterns stated in the memories."
+)
+# The recency clause must not fire on temporal-routed reads: temporal questions
+# ask about a SPECIFIC past event ("what happened X days ago?"), not the current
+# state, so preferring the most recent memory is wrong there.
+_RECENCY_CLAUSE_EXCLUDED_ROUTES: Final[frozenset[str]] = frozenset({"temporal"})
+# Absence-implies-unknown clause (GNOSIS_CON_ABSTENTION_ENABLED).
+# LME_S L-15 stable-wrong analysis identified two recurring absence-of-evidence
+# errors on abstention-category questions:
+# (1) "Zero instead of not-enough-info": model correctly notes no memory
+#     mentions an activity but then concludes the count is zero (88432d0a_abs:
+#     "no egg tart baking mentioned → zero times"; 0ddfec37_abs: "no football
+#     records → zero footballs"). The CoN base already says "say you don't know"
+#     but models bypass it by INFERRING zero from absence rather than FINDING zero
+#     in a memory. This clause makes the prohibition concrete.
+# (2) "Partial comparison": model finds data about one party in a who-did-X-first
+#     or who-did-X-more question, but not the other, and answers "Party A first"
+#     instead of abstaining (gpt4_fe651585_abs: Alex's parenting date known,
+#     Tom's unknown → model says "Alex first"). Gold expects "not enough info."
+# No route exclusion: temporal questions ask about confirmed events (activity IS
+# mentioned); the clause fires only when no memory mentions the activity at all,
+# which is not the temporal-question pattern.
+_CON_ABSTENTION_CLAUSE: Final[str] = (
+    " Do not infer that the count of an activity is zero simply because no memory "
+    "mentions it — the user may not have shared those details; say instead that "
+    "you do not have enough information. If the question asks who among two or more "
+    "people did something first, most, or at a specific time, and you only have "
+    "relevant information about some of them and not others, say you do not have "
+    "enough information to make that comparison."
+)
+
+# Recommendation-response clause (GNOSIS_CON_RECOMMENDATION_ENABLED).
+# LME_S L-17 stable-wrong analysis: SSP questions ("Can you recommend cultural
+# events?", "Any suggestions for Denver?") fail because the model describes the
+# user's preferences in the third person ("The user would prefer responses that
+# suggest...") instead of making concrete first/second-person recommendations.
+# Root cause: the model treats these as meta-questions about response preferences
+# rather than as requests to actually recommend based on recalled preferences.
+# The hypothesis evidence confirms the model finds the right memories (assistant
+# previously suggested language festivals / Denver attractions) but then pivots
+# to a preference-profile format. This clause redirects the final answer shape.
+_CON_RECOMMENDATION_CLAUSE: Final[str] = (
+    " When the question asks you to recommend, suggest, or advise (e.g. 'Can you "
+    "recommend...', 'Any suggestions for...', 'What should I...'), respond with "
+    "concrete suggestions derived from the memories. Do not describe what the user "
+    "would prefer in the third person; instead, make actual recommendations in "
+    "first or second person (e.g. 'You might enjoy X' or 'I would suggest Y') "
+    "based on what the memories reveal about their interests and past experiences."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -730,6 +850,12 @@ class Neo4jAgentMemoryBackend:
         )
         self._bridge_namer: BridgeNamer = bridge_namer or LiteLLMBridgeNamer(
             model=_routing_model(settings),
+            base_url=settings.litellm_base_url,
+            api_key=settings.litellm_api_key,
+        )
+        _rewrite_model = settings.gnosis_query_rewrite_model or settings.gnosis_llm
+        self._query_rewriter: LiteLLMQueryRewriter = LiteLLMQueryRewriter(
+            model=_rewrite_model,
             base_url=settings.litellm_base_url,
             api_key=settings.litellm_api_key,
         )
@@ -1052,7 +1178,18 @@ class Neo4jAgentMemoryBackend:
                     ),
                 )
 
-        sufficiency = await self._assess_sufficiency(request.query, sections)
+        if (
+            request.include_long_term
+            and decision.route == "aggregative"
+            and self._app_settings.gnosis_community_graph_enabled
+        ):
+            community_text = await self._get_community_context(request.scope)
+            _append_context_section(sections, "community", community_text)
+
+        sufficiency = await self._assess_sufficiency(
+            request.query, sections, decision=decision
+        )
+        sections = await self._rewrite_and_expand(request, sections, sufficiency)
         sections = self._with_abstention_instruction(sections, decision)
         return MemoryContextResponse(sections=sections, sufficiency=sufficiency)
 
@@ -1146,12 +1283,33 @@ class Neo4jAgentMemoryBackend:
             and decision.route in _ENUMERATION_CLAUSE_ROUTES
         ):
             enumeration_clause = _CON_ENUMERATION_CLAUSE
-        return f"{_CHAIN_OF_NOTE_BASE}{inference_clause}{enumeration_clause}"
+        recency_clause = (
+            _CON_RECENCY_CLAUSE
+            if self._app_settings.gnosis_con_recency_preference_enabled
+            and decision.route not in _RECENCY_CLAUSE_EXCLUDED_ROUTES
+            else ""
+        )
+        abstention_clause = (
+            _CON_ABSTENTION_CLAUSE
+            if self._app_settings.gnosis_con_abstention_enabled
+            else ""
+        )
+        recommendation_clause = (
+            _CON_RECOMMENDATION_CLAUSE
+            if self._app_settings.gnosis_con_recommendation_enabled
+            else ""
+        )
+        return (
+            f"{_CHAIN_OF_NOTE_BASE}{inference_clause}{recency_clause}"
+            f"{enumeration_clause}{abstention_clause}{recommendation_clause}"
+        )
 
     async def _assess_sufficiency(
         self,
         query: str,
         sections: list[MemoryContextSection],
+        *,
+        decision: RouteDecision | None = None,
     ) -> SufficiencyAssessment | None:
         """Judge whether the assembled context can answer the query.
 
@@ -1160,7 +1318,12 @@ class Neo4jAgentMemoryBackend:
         failure degrades to ``assessed=False`` so the check never blocks the
         context response.
         """
-        if not self._app_settings.gnosis_sufficiency_check_enabled or not query:
+        enabled = (
+            decision.sufficiency_check_enabled
+            if decision is not None
+            else self._app_settings.gnosis_sufficiency_check_enabled
+        )
+        if not enabled or not query:
             return None
         context = "\n\n".join(section.content for section in sections)
         try:
@@ -1179,10 +1342,252 @@ class Neo4jAgentMemoryBackend:
             reason=bounded_reason(verdict.reason),
         )
 
+    async def rebuild_communities(
+        self,
+        request: CommunityRebuildRequest,
+    ) -> CommunityRebuildResponse:
+        """Detect entity communities via BFS WCC and persist LLM summaries.
+
+        Reads the full entity + relation graph for the scope, runs weakly-
+        connected-components in Python (no Neo4j GDS required), skips
+        components below the configured minimum size, summarizes each via one
+        LLM call, and writes Community nodes + MEMBER_OF edges idempotently
+        via MERGE so repeat calls are safe. Any per-community failure (LLM or
+        write) is logged and skipped; the rebuild still returns a count of the
+        communities that succeeded.
+        """
+        scope = request.scope
+        tenant_id = scope.tenant_id
+        user_id = scope.user_id
+        scope_params: CypherParameters = {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+        }
+
+        async with self._memory_client() as client:
+            entity_rows, relation_rows = await asyncio.gather(
+                client.query.cypher(_FETCH_ENTITIES_CYPHER, scope_params),
+                client.query.cypher(_FETCH_RELATIONS_CYPHER, scope_params),
+            )
+
+        entities: list[str] = []
+        name_map: dict[str, str] = {}
+        for row in entity_rows:
+            normalized = row.get("normalized")
+            if not isinstance(normalized, str):
+                continue
+            entities.append(normalized)
+            name_val = row.get("name")
+            name_map[normalized] = name_val if isinstance(name_val, str) else normalized
+        edges: list[tuple[str, str]] = []
+        for row in relation_rows:
+            head = row.get("head_normalized")
+            tail = row.get("tail_normalized")
+            if isinstance(head, str) and isinstance(tail, str):
+                edges.append((head, tail))
+
+        components = weakly_connected_components(entities, edges)
+        min_size = self._app_settings.gnosis_community_min_entities
+        components = [c for c in components if len(c) >= min_size]
+
+        _model = self._app_settings.gnosis_llm
+        _base_url = self._app_settings.litellm_base_url
+        _api_key = self._app_settings.litellm_api_key
+
+        async def _build_one(members: list[str]) -> CommunityRecord | None:
+            fact_params: CypherParameters = {
+                "tenant_id": tenant_id,
+                "user_id": user_id,
+                "entity_normals": cast("list[JsonValue]", members),
+                "limit": _COMMUNITY_FACT_CAP,
+            }
+            try:
+                async with self._memory_client() as client:
+                    fact_rows = await client.query.cypher(
+                        _FETCH_ENTITY_FACTS_CYPHER, fact_params
+                    )
+            except (RuntimeError, OSError, Neo4jError) as err:
+                _LOGGER.warning(
+                    "community fact fetch failed; skipping community",
+                    extra={"error_type": type(err).__name__},
+                )
+                return None
+            fact_snippets: list[str] = []
+            for fr in fact_rows:
+                content = fr.get("content")
+                if isinstance(content, str) and content:
+                    fact_snippets.append(content)
+            entity_names = [name_map.get(m, m) for m in members]
+            summary = await summarize_community(
+                entity_names=entity_names,
+                fact_snippets=fact_snippets,
+                model=_model,
+                base_url=_base_url,
+                api_key=_api_key,
+            )
+            if summary is None:
+                return None
+            return CommunityRecord(
+                community_id=community_id_for(tenant_id, user_id, members),
+                normalized_members=members,
+                summary=summary,
+                member_count=len(members),
+            )
+
+        records_raw = await asyncio.gather(*[_build_one(c) for c in components])
+        valid_records: list[CommunityRecord] = [r for r in records_raw if r is not None]
+
+        await self._persist_community_records(valid_records, tenant_id, user_id)
+        return CommunityRebuildResponse(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            communities_built=len(valid_records),
+            entities_processed=len(entities),
+        )
+
+    async def _persist_community_records(
+        self,
+        records: list[CommunityRecord],
+        tenant_id: str,
+        user_id: str,
+    ) -> None:
+        """Write community MERGE + MEMBER_OF statements to Neo4j idempotently."""
+        if not records:
+            return
+        try:
+            async with self._memory_client() as client:
+                graph_write = _graph_write_query(client)
+                _ = await graph_write.execute_write(_CREATE_COMMUNITY_INDEX_CYPHER, {})
+                for record in records:
+                    for cypher, params in community_write_statements(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        community=record,
+                    ):
+                        _ = await graph_write.execute_write(cypher, params)
+        except (RuntimeError, OSError, Neo4jError) as err:
+            _LOGGER.warning(
+                "community write failed; communities may be partially persisted",
+                extra={"error_type": type(err).__name__},
+            )
+
+    async def _get_community_context(
+        self,
+        scope: MemoryScope,
+    ) -> str:
+        """Read persisted community summaries for the scope and format them.
+
+        Returns an empty string when community graph is disabled, no
+        communities exist yet, or the read fails - callers treat an empty
+        string as a no-op section.
+        """
+        if not self._app_settings.gnosis_community_graph_enabled:
+            return ""
+        limit = self._app_settings.gnosis_community_context_limit
+        params: CypherParameters = {
+            "tenant_id": scope.tenant_id,
+            "user_id": scope.user_id,
+            "limit": limit,
+        }
+        try:
+            async with self._memory_client() as client:
+                rows = await client.query.cypher(
+                    _FETCH_COMMUNITY_SUMMARIES_CYPHER, params
+                )
+        except (RuntimeError, OSError, Neo4jError) as err:
+            _LOGGER.warning(
+                "community context read failed; skipping community section",
+                extra={"error_type": type(err).__name__},
+            )
+            return ""
+        if not rows:
+            return ""
+        lines: list[str] = []
+        for row in rows:
+            summary = row.get("summary")
+            if isinstance(summary, str) and summary:
+                lines.append(f"- {summary}")
+        if not lines:
+            return ""
+        return "Entity community summaries:\n" + "\n".join(lines)
+
+    async def _rewrite_and_expand(
+        self,
+        request: MemoryContextRequest,
+        sections: list[MemoryContextSection],
+        sufficiency: SufficiencyAssessment | None,
+    ) -> list[MemoryContextSection]:
+        """Expand context via multi-query rewrite when the sufficiency check fails.
+
+        On sufficiency failure, generates complementary retrieval queries via
+        the configured rewrite model, runs dense retrieval for each, dedupes
+        against the already-retrieved fact IDs, and appends novel facts as an
+        additional ``query_rewrite`` section. A no-op (returns ``sections``
+        unchanged) when:
+        - GNOSIS_QUERY_REWRITE_ENABLED is off
+        - the sufficiency check was not run (``None``) or assessed sufficient
+        - the rewriter returns no alternative queries
+        - all rewrite candidates were already retrieved
+        """
+        if not self._app_settings.gnosis_query_rewrite_enabled:
+            return sections
+        if sufficiency is None or sufficiency.sufficient:
+            return sections
+        if not request.query:
+            return sections
+
+        existing_context = "\n\n".join(s.content for s in sections)
+        reason = sufficiency.reason if sufficiency.assessed else None
+
+        rewrite_result = await self._query_rewriter.rewrite(
+            original_query=request.query,
+            retrieved_context=existing_context,
+            insufficiency_reason=reason,
+        )
+        if rewrite_result is None or not rewrite_result.queries:
+            return sections
+
+        metadata = _scope_metadata(request.scope)
+        decision = RouteDecision.from_settings(self._app_settings)
+
+        rewrite_facts: list[JsonObject] = []
+        async with self._memory_client() as client:
+            for alt_query in rewrite_result.queries:
+                try:
+                    alt_facts = await self._query_ranked_facts(
+                        client, alt_query, metadata, decision
+                    )
+                    rewrite_facts.extend(alt_facts)
+                except (RuntimeError, OSError, Neo4jError) as err:
+                    _LOGGER.warning(
+                        "rewrite retrieval failed for alternative query",
+                        extra={"error_type": type(err).__name__},
+                    )
+
+        # Collect IDs already in sections via fact objects - use content as
+        # dedup key since section text is already serialized.
+        seen_content: set[str] = {s.content for s in sections}
+        novel_lines: list[str] = []
+        for fact in rewrite_facts:
+            line = _fact_context_line(fact)
+            if line not in seen_content:
+                novel_lines.append(line)
+                seen_content.add(line)
+
+        if not novel_lines:
+            return sections
+
+        rewrite_text = "\n".join(novel_lines)
+        return [
+            *sections,
+            MemoryContextSection(source="query_rewrite", content=rewrite_text),
+        ]
+
     async def _reranked_facts(
         self,
         query: str,
         facts: list[JsonObject],
+        route: QueryRoute | None = None,
     ) -> list[JsonObject]:
         """Reorder fused candidates by query relevance before the budget cut.
 
@@ -1190,11 +1595,17 @@ class Neo4jAgentMemoryBackend:
         while the flag is off, the query is empty, or there is nothing to
         reorder. Any failure degrades to the input order so reranking never
         drops a candidate or blocks a context read.
+
+        Route-aware: temporal and unanswerable_risk routes skip reranking.
+        Temporal BM25+dense ordering is already measured-best (Run L-1:
+        reranker -15.8pp on temporal); unanswerable_risk relies on retrieval
+        exhaustion for correct abstention, not relevance reordering.
         """
         if (
             not self._app_settings.gnosis_rerank_enabled
             or not query
             or len(facts) < MIN_RERANK_CANDIDATES
+            or route in ("temporal", "unanswerable_risk")
         ):
             return facts
         cap = rerank_candidate_cap(self._app_settings)
@@ -1252,8 +1663,8 @@ class Neo4jAgentMemoryBackend:
             [*graph_facts, *traversal_facts, *bridge_facts],
         )
         facts = await self._recall_filtered_facts(request.query, facts)
-        facts = self._superseded_facts(facts)
-        facts = await self._reranked_facts(request.query, facts)
+        facts = self._superseded_facts(facts, decision=decision)
+        facts = await self._reranked_facts(request.query, facts, route=decision.route)
         facts = _cut_with_graph_reserve(
             facts,
             request.max_items * decision.budget_multiplier,
@@ -1607,9 +2018,10 @@ class Neo4jAgentMemoryBackend:
         Strictly additive: extraction and per-unit write failures log a
         structured warning and leave the verbatim add untouched.
         """
+        conversation_date = _conversation_date(caller_metadata)
         units = await extract_memory_units(
             self._fact_extractor,
-            conversation_date=_conversation_date(caller_metadata),
+            conversation_date=conversation_date,
             context_turns=context_turns,
             new_turns=new_turns,
         )
@@ -1623,6 +2035,7 @@ class Neo4jAgentMemoryBackend:
                         unit=unit,
                         caller_metadata=caller_metadata,
                         source_memory_ids=source_memory_ids,
+                        conversation_date=conversation_date,
                     ),
                 )
             except (
@@ -1639,7 +2052,7 @@ class Neo4jAgentMemoryBackend:
                 )
         return results
 
-    async def _add_extracted_fact(
+    async def _add_extracted_fact(  # noqa: PLR0913 - One argument per fact field.
         self,
         client: MemoryClientContext,
         scope: MemoryScope,
@@ -1647,6 +2060,7 @@ class Neo4jAgentMemoryBackend:
         unit: MemoryUnit,
         caller_metadata: JsonObject,
         source_memory_ids: list[str],
+        conversation_date: str | None = None,
     ) -> MemoryAddResult:
         """Write one extracted unit as an ordinary long-term ``Fact`` node.
 
@@ -1663,6 +2077,16 @@ class Neo4jAgentMemoryBackend:
         }
         if unit.event_date is not None:
             extraction_metadata["event_date"] = unit.event_date
+        # Store the conversation date as the observation anchor so temporal
+        # queries see when this fact was true, not when gnosis ingested it.
+        # event_date wins (more specific); this is the fallback for ongoing-state
+        # facts like "has been doing X for N months" where no specific event date
+        # exists. Without this, _fact_date() falls through to created_at (today),
+        # which is wrong and causes temporal hallucinations in the answer model.
+        if conversation_date:
+            extraction_metadata["date"] = conversation_date
+        if unit.temporal_state not in ("unknown", None):
+            extraction_metadata["temporal_state"] = unit.temporal_state
         metadata = _write_metadata(scope, caller_metadata | extraction_metadata, None)
         # Provenance ids are gateway-generated fact UUIDs, added after
         # redaction because the opaque-value secret pattern matches UUIDs.
@@ -1810,9 +2234,19 @@ class Neo4jAgentMemoryBackend:
             ],
         )
 
-    def _superseded_facts(self, facts: list[JsonObject]) -> list[JsonObject]:
+    def _superseded_facts(
+        self,
+        facts: list[JsonObject],
+        *,
+        decision: RouteDecision | None = None,
+    ) -> list[JsonObject]:
         """Drop same-slot older facts from the ranked context candidates."""
-        if not self._app_settings.gnosis_read_supersession_enabled:
+        enabled = (
+            decision.supersession_enabled
+            if decision is not None
+            else self._app_settings.gnosis_read_supersession_enabled
+        )
+        if not enabled:
             return facts
         kept, dropped = drop_superseded(facts, _fact_freshness)
         _log_supersession(dropped, len(facts), surface="context")

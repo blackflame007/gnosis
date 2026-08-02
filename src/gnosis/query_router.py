@@ -65,18 +65,32 @@ type QueryRoute = Literal[
 _ROUTER_GUIDE: Final[str] = """
 You classify one memory-retrieval query into exactly one route.
 Routes:
-- temporal: asks when something happened, a date, a duration, an ordering in
-  time, or "how long ago / how many days" (e.g. "When did Maria adopt the
-  cat?", "How long has Tom worked at the bakery?").
+- temporal: asks WHEN something happened, a specific DATE, elapsed time
+  ("how long ago", "how many days/months ago", "how many days/months since"),
+  or ordering in time (e.g. "When did Maria adopt the cat?", "How long has Tom
+  worked at the bakery?", "How many months have passed since my last visit?",
+  "How long had I been running when I finished my first 5K?").
+  IMPORTANT: Do NOT classify here if the question asks "how many TIMES" or
+  "how many DIFFERENT things" — those are frequency counts, not time offsets;
+  route them to aggregative instead.
 - multi_hop: needs two or more distinct remembered facts chained through a
   bridge entity to answer (e.g. "What instrument does the sister of John's
   coworker play?", "Which city is the company that Ana joined based in?").
-- aggregative: asks for a broad summary, list, or synthesis across many
-  conversations or topics (e.g. "What do they usually talk about?", "List all
-  the hobbies mentioned.").
+- aggregative: asks for a count, frequency, or synthesis across many memories
+  (e.g. "What do they usually talk about?", "List all the hobbies mentioned.",
+  "How many times did I do X?", "How many different Y did I attend?").
 - unanswerable_risk: presupposes or asks about something personal memories
-  likely never contain, fishing for a fact that was probably never said
-  (e.g. "What brand of toothpaste does Bob's dentist recommend?").
+  definitively do not contain — a private/obscure fact that could not
+  realistically appear in casual personal conversation
+  (e.g. "What brand of toothpaste does Bob's dentist recommend?",
+  "What is my coworker's mother's maiden name?").
+  CRITICAL: When the query says "I mentioned X", "I told you X", "I discussed
+  X", or otherwise signals the user KNOWS the topic was recorded, that fact IS
+  in memory — choose single_hop, temporal, multi_hop, or aggregative as
+  appropriate, NEVER unanswerable_risk. Also prefer temporal over
+  unanswerable_risk whenever the query asks how long, when, what date, or how
+  many days/months (elapsed time) — those are duration/time questions, not
+  absence questions.
 - single_hop: everything else - one remembered fact answers it directly.
 Choose the single best route. Respond with only the route name.
 """.strip()
@@ -114,6 +128,8 @@ class RouteDecision:
     bridge_traversal: bool
     chain_of_note: bool
     budget_multiplier: int
+    supersession_enabled: bool
+    sufficiency_check_enabled: bool
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "RouteDecision":
@@ -128,6 +144,8 @@ class RouteDecision:
             bridge_traversal=settings.gnosis_bridge_traversal_enabled,
             chain_of_note=settings.gnosis_chain_of_note_enabled,
             budget_multiplier=settings.gnosis_coverage_budget_multiplier,
+            supersession_enabled=settings.gnosis_read_supersession_enabled,
+            sufficiency_check_enabled=settings.gnosis_sufficiency_check_enabled,
         )
 
     @classmethod
@@ -150,7 +168,16 @@ class RouteDecision:
         """
         return cls(
             route=route,
-            hybrid_retrieval=route == "temporal",
+            # Temporal gets hybrid BM25 (Run 6: exact dates/names in verbatim
+            # turns). Aggregative also gets it: LME_S analysis shows exact
+            # keyword matching surfaces scattered per-event facts (art events,
+            # camping trips) that fall below the dense-only top-20 cut.
+            # Single_hop added (LME_S L-20): two stable-wrong questions
+            # (0bc8ad93 museum companion, a96c20ee_abs university poster) are
+            # likely single_hop with specific entity/keyword facts that fall
+            # below dense top-20; BM25 should surface them. LOCOMO evidence:
+            # global BM25 was neutral for single_hop (80.5→79.5, Run 6).
+            hybrid_retrieval=route in ("temporal", "aggregative", "single_hop"),
             graphqa_fusion=route == "multi_hop",
             verbatim_expansion=route == "multi_hop",
             abstention_prompt=route == "unanswerable_risk",
@@ -172,6 +199,29 @@ class RouteDecision:
                 settings.gnosis_coverage_budget_multiplier
                 if route in ("multi_hop", "aggregative")
                 else 1
+            ),
+            # Temporal queries ask for historical first-occurrence or
+            # timestamped events. Supersession's "newest-wins" aggregation
+            # discards earlier facts for the same slot, removing the dated
+            # history that temporal retrieval needs (L-4 result: -21pp vs
+            # L-0 baseline when supersession was applied globally).
+            # Unanswerable-risk also opts out: it needs the full fact set
+            # to correctly conclude "this topic was never mentioned" rather
+            # than being misled by a thin slice of the most-recent context.
+            # Aggregative also opts out: summing/counting across sessions
+            # requires all occurrences; "newest-wins" discards older values
+            # that are addends (e.g. combined reading time across two books).
+            supersession_enabled=(
+                route not in ("temporal", "unanswerable_risk", "aggregative")
+                and settings.gnosis_read_supersession_enabled
+            ),
+            # Sufficiency check signals "not enough info" — useful only for
+            # unanswerable_risk, where detecting genuine absence is the goal.
+            # Applied globally it marks temporal/SSU facts as insufficient and
+            # the model abstains on answerable questions (L-6: -16pp temporal).
+            sufficiency_check_enabled=(
+                route == "unanswerable_risk"
+                and settings.gnosis_sufficiency_check_enabled
             ),
         )
 
