@@ -416,7 +416,12 @@ from gnosis.models import (
     SufficiencyAssessment,
 )
 from gnosis.query_rewrite import LiteLLMQueryRewriter
-from gnosis.query_router import LiteLLMQueryRouter, QueryRoute, QueryRouter, RouteDecision
+from gnosis.query_router import (
+    LiteLLMQueryRouter,
+    QueryRoute,
+    QueryRouter,
+    RouteDecision,
+)
 from gnosis.reasoning_support import (
     REASONING_READ_UNAVAILABLE_DETAIL as _REASONING_READ_UNAVAILABLE_DETAIL,
 )
@@ -688,7 +693,7 @@ _ENUMERATION_CLAUSE_ROUTES: Final[frozenset[str]] = frozenset(
 # ("state that value directly") and (b) be skipped on temporal-routed reads
 # where "most recent fact" ≠ "the specific past event the question asks about".
 # Also adds an anti-extrapolation rule to prevent forward projection from rates
-# (LME_S 1cea1afa: model calculated 600 + 10/week × 17d ≈ 624 from two
+# (LME_S 1cea1afa: model calculated 600 + 10/week x 17d ~= 624 from two
 # complementary facts instead of reporting the last known count of 600).
 # L-13 lesson: "the same fact" was too loose — the model conflated related-but-
 # different facts (baseball ↔ football, guitar ↔ violin) and fired the clause
@@ -756,9 +761,10 @@ _CON_RECOMMENDATION_CLAUSE: Final[str] = (
     "recommend...', 'Any suggestions for...', 'What should I...'), respond with "
     "concrete suggestions derived from the memories. Do not describe what the user "
     "would prefer in the third person; instead, make actual recommendations in "
-    "first or second person (e.g. 'You might enjoy X' or 'I’d suggest Y') "
+    "first or second person (e.g. 'You might enjoy X' or 'I would suggest Y') "
     "based on what the memories reveal about their interests and past experiences."
 )
+
 
 @dataclass(frozen=True, slots=True)
 class LongTermFactsContext:
@@ -847,9 +853,7 @@ class Neo4jAgentMemoryBackend:
             base_url=settings.litellm_base_url,
             api_key=settings.litellm_api_key,
         )
-        _rewrite_model = (
-            settings.gnosis_query_rewrite_model or settings.gnosis_llm
-        )
+        _rewrite_model = settings.gnosis_query_rewrite_model or settings.gnosis_llm
         self._query_rewriter: LiteLLMQueryRewriter = LiteLLMQueryRewriter(
             model=_rewrite_model,
             base_url=settings.litellm_base_url,
@@ -1182,7 +1186,9 @@ class Neo4jAgentMemoryBackend:
             community_text = await self._get_community_context(request.scope)
             _append_context_section(sections, "community", community_text)
 
-        sufficiency = await self._assess_sufficiency(request.query, sections, decision=decision)
+        sufficiency = await self._assess_sufficiency(
+            request.query, sections, decision=decision
+        )
         sections = await self._rewrite_and_expand(request, sections, sufficiency)
         sections = self._with_abstention_instruction(sections, decision)
         return MemoryContextResponse(sections=sections, sufficiency=sufficiency)
@@ -1293,7 +1299,10 @@ class Neo4jAgentMemoryBackend:
             if self._app_settings.gnosis_con_recommendation_enabled
             else ""
         )
-        return f"{_CHAIN_OF_NOTE_BASE}{inference_clause}{recency_clause}{enumeration_clause}{abstention_clause}{recommendation_clause}"
+        return (
+            f"{_CHAIN_OF_NOTE_BASE}{inference_clause}{recency_clause}"
+            f"{enumeration_clause}{abstention_clause}{recommendation_clause}"
+        )
 
     async def _assess_sufficiency(
         self,
@@ -1448,9 +1457,7 @@ class Neo4jAgentMemoryBackend:
         try:
             async with self._memory_client() as client:
                 graph_write = _graph_write_query(client)
-                _ = await graph_write.execute_write(
-                    _CREATE_COMMUNITY_INDEX_CYPHER, {}
-                )
+                _ = await graph_write.execute_write(_CREATE_COMMUNITY_INDEX_CYPHER, {})
                 for record in records:
                     for cypher, params in community_write_statements(
                         tenant_id=tenant_id,
@@ -1591,7 +1598,7 @@ class Neo4jAgentMemoryBackend:
 
         Route-aware: temporal and unanswerable_risk routes skip reranking.
         Temporal BM25+dense ordering is already measured-best (Run L-1:
-        reranker −15.8pp on temporal); unanswerable_risk relies on retrieval
+        reranker -15.8pp on temporal); unanswerable_risk relies on retrieval
         exhaustion for correct abstention, not relevance reordering.
         """
         if (
@@ -2045,7 +2052,7 @@ class Neo4jAgentMemoryBackend:
                 )
         return results
 
-    async def _add_extracted_fact(
+    async def _add_extracted_fact(  # noqa: PLR0913 - One argument per fact field.
         self,
         client: MemoryClientContext,
         scope: MemoryScope,

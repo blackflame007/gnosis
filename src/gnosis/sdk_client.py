@@ -10,7 +10,16 @@ graph export conversion) that adapt SDK objects for the backend.
 
 from collections.abc import Awaitable, Sequence
 from datetime import datetime
-from typing import Final, Literal, Protocol, Self, TypedDict, cast, runtime_checkable
+from typing import (
+    Final,
+    Literal,
+    Protocol,
+    Self,
+    TypedDict,
+    cast,
+    final,
+    runtime_checkable,
+)
 from uuid import UUID
 
 from neo4j_agent_memory import MemoryConfig, MemorySettings, Neo4jConfig
@@ -435,6 +444,10 @@ class TextEmbedder(Protocol):
     def embed(self, text: str) -> Awaitable[list[float]]: ...
 
 
+_EMBEDDING_MAX_CHARS: Final[int] = 30_000
+
+
+@final
 class _TruncatingEmbedding:
     """Wraps LiteLLMEmbeddingProvider, pre-truncating texts to 30 000 chars.
 
@@ -450,11 +463,11 @@ class _TruncatingEmbedding:
         self.dimensions = inner.dimensions
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        truncated = [t[:30_000] if len(t) > 30_000 else t for t in texts]
+        truncated = [t[:_EMBEDDING_MAX_CHARS] for t in texts]
         return await self._inner.embed(truncated)
 
     async def embed_one(self, text: str) -> list[float]:
-        result = await self.embed([text[:30_000]])
+        result = await self.embed([text[:_EMBEDDING_MAX_CHARS]])
         return result[0]
 
 

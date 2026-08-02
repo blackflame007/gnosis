@@ -226,9 +226,9 @@ class MemoryUnit(BaseModel):
     source_turn_ids: list[int] = Field(default_factory=list)
     entities: list[str] = Field(default_factory=list)
     event_date: str | None = None
-    temporal_state: Literal[
-        "point_in_time", "starts", "ends", "ongoing", "unknown"
-    ] = "unknown"
+    temporal_state: Literal["point_in_time", "starts", "ends", "ongoing", "unknown"] = (
+        "unknown"
+    )
     supersedes_hint: str | None = None
 
 

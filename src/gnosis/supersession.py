@@ -49,7 +49,9 @@ class FactFreshness:
 
     slot_key: SlotKey | None
     event_date: str | None
-    observation_date: str | None  # conversation_date stored at ingest (metadata["date"])
+    observation_date: (
+        str | None
+    )  # conversation_date stored at ingest (metadata["date"])
     created_at: str | None
 
 
@@ -117,7 +119,10 @@ def _first_entity(entities: Sequence[str]) -> str | None:
 def _strictly_newer(candidate: FactFreshness, reference: FactFreshness) -> bool:
     if candidate.event_date is not None and reference.event_date is not None:
         return candidate.event_date > reference.event_date
-    if candidate.observation_date is not None and reference.observation_date is not None:
+    if (
+        candidate.observation_date is not None
+        and reference.observation_date is not None
+    ):
         return candidate.observation_date > reference.observation_date
     if candidate.created_at is not None and reference.created_at is not None:
         return candidate.created_at > reference.created_at
