@@ -39,8 +39,12 @@ from gnosis.memory_provider import (
     TURN_MEMORY_PREDICATE_PREFIX,
     VERBATIM_MEMORY_PREDICATE,
 )
+from gnosis.models import JsonObject
 
 type SlotKey = tuple[str, ...]
+
+_POINT_IN_TIME = "point_in_time"
+_STATE_TEMPORAL_STATES = {"starts", "ongoing", "ends"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,8 +63,16 @@ def slot_key(
     subject: str,
     predicate: str,
     entities: Sequence[str],
+    metadata: JsonObject | None = None,
 ) -> SlotKey | None:
-    """Compute the same-slot signature, or ``None`` when never supersedable."""
+    """Compute the same-slot signature, or ``None`` when never supersedable.
+
+    Extracted facts use relation-class slots when available (``relation_slots``
+    stored at ingest for state-bearing facts): "alice:works_at" means only facts
+    about Alice's employment compete, leaving location/hobby facts untouched.
+    Falls back to first-entity slot for facts ingested before L-24. Returns
+    ``None`` for point_in_time events — one-off events do not displace states.
+    """
     normalized_subject = subject.strip().casefold()
     if not normalized_subject:
         return None
@@ -69,6 +81,17 @@ def slot_key(
     ):
         return None
     if predicate == EXTRACTED_FACT_PREDICATE:
+        if metadata is not None:
+            # Prefer precise relation-class slot (stored from L-24 ingest onward)
+            rslots = metadata.get("relation_slots")
+            if isinstance(rslots, list) and rslots:
+                first = rslots[0]
+                if isinstance(first, str) and first.strip():
+                    return (normalized_subject, predicate, first.strip())
+            # point_in_time events don't displace state facts
+            ts = metadata.get("temporal_state")
+            if ts == _POINT_IN_TIME:
+                return None
         first_entity = _first_entity(entities)
         if first_entity is None:
             return None

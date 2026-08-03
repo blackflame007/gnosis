@@ -2087,6 +2087,24 @@ class Neo4jAgentMemoryBackend:
             extraction_metadata["date"] = conversation_date
         if unit.temporal_state not in ("unknown", None):
             extraction_metadata["temporal_state"] = unit.temporal_state
+        if unit.supersedes_hint is not None:
+            extraction_metadata["supersedes_hint"] = unit.supersedes_hint
+        # Compute relation-class slots for precise read-time supersession.
+        # State-bearing facts (starts/ongoing/ends) occupy a named slot so that
+        # a newer "Alice works at Nvidia" correctly supersedes "Alice works at
+        # Google" without touching unrelated Alice facts (location, hobbies, etc.).
+        # point_in_time events are excluded — they shouldn't displace state facts.
+        if unit.temporal_state in ("starts", "ongoing", "ends"):
+            _rslots: list[JsonValue] = []
+            for _rel in unit_relations(unit):
+                _head = _rel.head.strip().casefold()
+                _cls = "_".join(
+                    p for p in _rel.relation.strip().casefold().split() if p
+                )
+                if _head and _cls:
+                    _rslots.append(f"{_head}:{_cls}")
+            if _rslots:
+                extraction_metadata["relation_slots"] = _rslots
         metadata = _write_metadata(scope, caller_metadata | extraction_metadata, None)
         # Provenance ids are gateway-generated fact UUIDs, added after
         # redaction because the opaque-value secret pattern matches UUIDs.
