@@ -721,6 +721,10 @@ _CON_RECENCY_CLAUSE: Final[str] = (
 # ask about a SPECIFIC past event ("what happened X days ago?"), not the current
 # state, so preferring the most recent memory is wrong there.
 _RECENCY_CLAUSE_EXCLUDED_ROUTES: Final[frozenset[str]] = frozenset({"temporal"})
+# Number of most-recently-created facts injected for knowledge_update route
+# (L-29). Kept small so only the latest ingest is guaranteed a slot before
+# the budget cut, without flooding the context with unrelated recent facts.
+_RECENCY_INJECTION_LIMIT: Final[int] = 5
 # Absence-implies-unknown clause (GNOSIS_CON_ABSTENTION_ENABLED).
 # LME_S L-15 stable-wrong analysis identified two recurring absence-of-evidence
 # errors on abstention-category questions:
@@ -1649,6 +1653,26 @@ class Neo4jAgentMemoryBackend:
         )
         if not facts:
             facts = await _query_recent_facts(client, metadata)
+        # knowledge_update route: guarantee the most recently ingested facts
+        # are in the candidate pool. Updates about a changing fact rank low on
+        # embedding similarity (the update is phrased in a different context
+        # than the question) — injecting by ingest recency ensures the newest
+        # value is always a candidate before the budget cut. Deduplication by
+        # fact id prevents double-counting facts already in the dense ranking.
+        if decision.recency_injection_enabled:
+            recent = await _query_recent_facts(client, metadata)
+            existing_ids = {f.get("id") for f in facts if isinstance(f.get("id"), str)}
+            injected = [
+                {**rf, "recency_injected": True}
+                for rf in recent[:_RECENCY_INJECTION_LIMIT]
+                if rf.get("id") not in existing_ids
+            ]
+            if injected:
+                _LOGGER.info(
+                    "knowledge_update recency injection",
+                    extra={"injected": len(injected), "dense": len(facts)},
+                )
+                facts = [*facts, *injected]
         # The directed bridge hop reads hop-1's dense evidence, so it runs
         # after the parallel retrieval legs, not among them.
         bridge_facts = await self._bridge_traversal_facts(
