@@ -64,3 +64,10 @@ flags. Full per-run detail: [docs/BENCHMARKS.md](../docs/BENCHMARKS.md).
 ¹ Run 23 is the full-10-conversation measurement (excl-adv J, two judges); all
 other rows are the subset-3 dev gate. Runs 24–25 are queued LongMemEval_S
 experiments; ctx J column will be filled after measurement.
+
+**Note:** the LOCOMO run numbers above (Runs 1–25) are separate from the LongMemEval_S
+experiment labels (L-0 through L-27 in gnosis-membench). Run 24 = LME_S LLM reranker
+experiment (gnosis-membench L-26); Run 25 = LME_S community graph experiment (L-27).
+The current active LME_S experiments are:
+- **L-25** (completed 2026-08-05): edu-v2.0 + relation_slots. **72.4%** overall (+2.6pp vs L-23); SSA **94.6%** (+53.5pp), KU **73.1%** (+49.5pp). SSP/multi-session regressions under investigation (judge change + possible over-supersession).
+See [gnosis-membench RESULTS.md](https://github.com/blackflame007/gnosis-membench/blob/main/RESULTS.md).
