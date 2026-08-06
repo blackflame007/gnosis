@@ -46,6 +46,37 @@ type SlotKey = tuple[str, ...]
 _POINT_IN_TIME = "point_in_time"
 _STATE_TEMPORAL_STATES = {"starts", "ongoing", "ends"}
 
+# Relation-class first-word allowlist for singleton state facts.
+# A "singleton" relation can have at most one true value at a time for a given
+# entity (e.g. employer, home city, relationship status). Only these compete for
+# a named supersession slot so that a newer "Alice works at NVIDIA" correctly
+# displaces "Alice works at Google".
+#
+# Additive relations (likes, prefers, has_hobby, …) can have multiple concurrent
+# values and must NOT be given a shared slot — collisions cause preference and
+# multi-session facts to silently drop, which is worse than keeping both.
+_SINGLETON_RELATION_PREFIXES: frozenset[str] = frozenset({
+    # Employment / role
+    "works", "employed", "employs",
+    # Location / residence
+    "lives", "resides", "located", "based", "moved",
+    # Relationship status
+    "married", "engaged", "dating", "divorced", "separated", "widowed",
+    # Education (current enrolment)
+    "studies", "enrolled", "graduated", "attends", "attending",
+})
+
+
+def is_singleton_relation_class(relation_class: str) -> bool:
+    """Return True if this relation describes a singleton state.
+
+    Uses the first word of the underscore-joined relation class as the
+    discriminator ("works_at_nvidia" → "works" → singleton; "prefers_coffee"
+    → "prefers" → additive).
+    """
+    first_word = relation_class.split("_")[0] if relation_class else ""
+    return first_word in _SINGLETON_RELATION_PREFIXES
+
 
 @dataclass(frozen=True, slots=True)
 class FactFreshness:
@@ -82,12 +113,17 @@ def slot_key(
         return None
     if predicate == EXTRACTED_FACT_PREDICATE:
         if metadata is not None:
-            # Prefer precise relation-class slot (stored from L-24 ingest onward)
+            # Prefer precise relation-class slot (stored from L-25 ingest onward)
+            # but only for singleton relations — additive relations (likes, prefers,
+            # has_hobby) fall through to the entity-first slot below so multiple
+            # concurrent values for the same entity can coexist.
             rslots = metadata.get("relation_slots")
             if isinstance(rslots, list) and rslots:
                 first = rslots[0]
                 if isinstance(first, str) and first.strip():
-                    return (normalized_subject, predicate, first.strip())
+                    relation_class = first.strip().split(":", 1)[-1]
+                    if is_singleton_relation_class(relation_class):
+                        return (normalized_subject, predicate, first.strip())
             # point_in_time events don't displace state facts
             ts = metadata.get("temporal_state")
             if ts == _POINT_IN_TIME:

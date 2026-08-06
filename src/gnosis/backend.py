@@ -539,7 +539,7 @@ from gnosis.sufficiency import (
     SufficiencyAssessor,
     bounded_reason,
 )
-from gnosis.supersession import drop_superseded
+from gnosis.supersession import drop_superseded, is_singleton_relation_class
 
 if TYPE_CHECKING:
     from gnosis.graph_types import CypherParameters
@@ -2090,10 +2090,11 @@ class Neo4jAgentMemoryBackend:
         if unit.supersedes_hint is not None:
             extraction_metadata["supersedes_hint"] = unit.supersedes_hint
         # Compute relation-class slots for precise read-time supersession.
-        # State-bearing facts (starts/ongoing/ends) occupy a named slot so that
-        # a newer "Alice works at Nvidia" correctly supersedes "Alice works at
-        # Google" without touching unrelated Alice facts (location, hobbies, etc.).
-        # point_in_time events are excluded — they shouldn't displace state facts.
+        # Only singleton relations (works_at, lives_in, married_to, …) occupy a
+        # named slot so that a newer "Alice works at NVIDIA" displaces "Alice works
+        # at Google" without touching unrelated facts.  Additive relations (likes,
+        # prefers, has_hobby) are intentionally excluded: they can have multiple
+        # concurrent values and a shared slot would cause silent data loss.
         if unit.temporal_state in ("starts", "ongoing", "ends"):
             _rslots: list[JsonValue] = []
             for _rel in unit_relations(unit):
@@ -2101,7 +2102,7 @@ class Neo4jAgentMemoryBackend:
                 _cls = "_".join(
                     p for p in _rel.relation.strip().casefold().split() if p
                 )
-                if _head and _cls:
+                if _head and _cls and is_singleton_relation_class(_cls):
                     _rslots.append(f"{_head}:{_cls}")
             if _rslots:
                 extraction_metadata["relation_slots"] = _rslots
