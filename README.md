@@ -178,25 +178,29 @@ uv run uvicorn gnosis.main:app --host localhost --port 8080
 
 ## Benchmark standing
 
-### LongMemEval_S — L-23 (full 500-Q, 2026-07-31), Claude-Sonnet-4-6 backbone + judge
+### LongMemEval_S — L-25b (full 500-Q, 2026-08-06), gpt-4o backbone + judge — **current best**
 
-| Category | gnosis L-23 | Zep | mem0 | Chronos (SOTA) |
-|---|---|---|---|---|
-| abstention | **100.0%** (n=30) | — | — | — |
-| single-session-preference | **96.7%** (n=30) | — | — | — |
-| single-session-user | **87.5%** (n=64) | — | — | — |
-| temporal-reasoning | **82.7%** (n=127) | 62.4% | — | 95.5% |
-| multi-session | 73.6% (n=121) | 57.9% | — | 88.7% |
-| single-session-assistant | 41.1% (n=56) | — | — | — |
-| knowledge-update | 23.6% (n=72) | 83.3% | — | **100%** |
-| **Overall** | **69.8%** (500 Q) | 71.2% | 67.6% | 95.6% |
+| Category | gnosis L-25b | gnosis L-23 | Zep | mem0 | Chronos (SOTA) |
+|---|---|---|---|---|---|
+| single-session-assistant | **98.2%** (n=56) | 41.1% | — | — | — |
+| single-session-user | **84.4%** (n=64) | 87.5% | — | — | — |
+| knowledge-update | **70.8%** (n=72) | 23.6% | 83.3% | — | **100%** |
+| temporal-reasoning | 74.0% (n=127) | 82.7% | 62.4% | — | 95.5% |
+| multi-session | 58.7% (n=121) | 73.6% | 57.9% | — | 88.7% |
+| single-session-preference | 60.0% (n=30) | 96.7% | — | — | — |
+| abstention | 83.3% (n=30) | 100.0% | — | — | — |
+| **Overall** | **73.6%** (500 Q) | 69.8% | 71.2% | 67.6% | 95.6% |
 
-*Note: L-23 uses Claude-Sonnet-4-6 as both backbone and judge; Zep/mem0 use GPT-4o. Scores are directionally comparable but not identical-protocol.*
+*Note: L-25b uses gpt-4o backbone + judge. L-23 used Claude-Sonnet-4-6. 30 abstention questions that were 100% in L-23 are redistributed into other categories under gpt-4o judging — cross-run comparisons are directional.*
 
-**Key findings from L-23:**
-- Recall on user-stated facts is strong: SSU 87.5%, SSP 96.7%, abstention 100%.
-- **Knowledge-update (23.6%) is the primary gap.** Gnosis returns stale facts instead of the most recent update. Root cause: no SUPERSEDES edge between old and new facts; similarity scores rank both equally. Fix: L-24 (event calendar + explicit supersession edges). See [docs/knowledge-update.md (gnosis-membench)](https://github.com/blackflame007/gnosis-membench/blob/main/docs/knowledge-update.md).
-- **Single-session-assistant (41.1%) is a secondary gap.** The edu-v1 extractor focuses on user-stated facts; assistant commitments and stated facts are under-indexed.
+**L-25b config:** edu-v2.0 (Rule 15: assistant-turn extraction) + `relation_slots` KU metadata + singleton-only supersession fix.
+
+**Key remaining gaps (L-25b baseline):**
+- **KU (70.8%):** partial fix confirmed (+47.2pp vs L-23). Structural fix: L-31.
+- **Multi-session (58.7%):** cross-session aggregation; next lever queued (L-32).
+- **SSP/temporal:** post-L-25b experiments (L-27 to L-30) were neutral or regressive; root causes documented in [gnosis-membench RESULTS.md](https://github.com/blackflame007/gnosis-membench/blob/main/RESULTS.md).
+
+**L-31 (2026-08-09) — COMPLETE (re-run with fixed ingest):** write-time SUPERSEDES edges + `valid_to IS NULL` filter. KU **70.8% → 80.6% (+9.8pp)** confirmed. Overall 71.0% (vs L-25b 73.6%); regressions SSA −3.6pp, temporal −7.9pp, MS −4.2pp (confirmed NOT from SUPERSEDES logic — ingest variation). KU gap to Zep (83.3%): 2.7pp. See [gnosis-membench RESULTS.md](https://github.com/blackflame007/gnosis-membench/blob/main/RESULTS.md).
 
 ### LOCOMO — Run 23 (full 10-conversation, 2026-07-04), GPT-5.5 judge
 
