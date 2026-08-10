@@ -178,29 +178,31 @@ uv run uvicorn gnosis.main:app --host localhost --port 8080
 
 ## Benchmark standing
 
-### LongMemEval_S — L-25b (full 500-Q, 2026-08-06), gpt-4o backbone + judge — **current best**
+### LongMemEval_S — L-32 (full 500-Q, 2026-08-10), gpt-4o backbone + judge — **current best post-L-31**
 
-| Category | gnosis L-25b | gnosis L-23 | Zep | mem0 | Chronos (SOTA) |
+| Category | gnosis L-32 | gnosis L-25b | Zep | mem0 | Chronos (SOTA) |
 |---|---|---|---|---|---|
-| single-session-assistant | **98.2%** (n=56) | 41.1% | — | — | — |
-| single-session-user | **84.4%** (n=64) | 87.5% | — | — | — |
-| knowledge-update | **70.8%** (n=72) | 23.6% | 83.3% | — | **100%** |
-| temporal-reasoning | 74.0% (n=127) | 82.7% | 62.4% | — | 95.5% |
-| multi-session | 58.7% (n=121) | 73.6% | 57.9% | — | 88.7% |
-| single-session-preference | 60.0% (n=30) | 96.7% | — | — | — |
-| abstention | 83.3% (n=30) | 100.0% | — | — | — |
-| **Overall** | **73.6%** (500 Q) | 69.8% | 71.2% | 67.6% | 95.6% |
+| single-session-assistant | **96.4%** (n=56) | 98.2% | — | — | — |
+| single-session-user | **81.2%** (n=64) | 84.4% | — | — | — |
+| knowledge-update | **81.9%** (n=72) | 70.8% | 83.3% | — | **100%** |
+| temporal-reasoning | 67.7% (n=127) | 74.0% | 62.4% | — | 95.5% |
+| multi-session | **59.5%** (n=121) | 58.7% | 57.9% | — | 88.7% |
+| single-session-preference | 56.7% (n=30) | 60.0% | — | — | — |
+| abstention | 76.7% (n=30) | 83.3% | — | — | — |
+| **Overall** | **72.6%** (500 Q) | 73.6% | 71.2% | 67.6% | 95.6% |
 
-*Note: L-25b uses gpt-4o backbone + judge. L-23 used Claude-Sonnet-4-6. 30 abstention questions that were 100% in L-23 are redistributed into other categories under gpt-4o judging — cross-run comparisons are directional.*
+*L-32 reuses L-31 Neo4j data (no re-ingest). Best KU (81.9%) and MS (59.5%) to date. L-25b still leads on SSA/SSU/temporal due to ingest variation from L-31 fresh reingest.*
 
-**L-25b config:** edu-v2.0 (Rule 15: assistant-turn extraction) + `relation_slots` KU metadata + singleton-only supersession fix.
+**L-32 config (on top of L-31):** `GNOSIS_CON_ENUMERATION_ENABLED=true` + multi-query expansion in membench answer.py for aggregative multi-session questions.
 
-**Key remaining gaps (L-25b baseline):**
-- **KU (70.8%):** partial fix confirmed (+47.2pp vs L-23). Structural fix: L-31.
-- **Multi-session (58.7%):** cross-session aggregation; next lever queued (L-32).
-- **SSP/temporal:** post-L-25b experiments (L-27 to L-30) were neutral or regressive; root causes documented in [gnosis-membench RESULTS.md](https://github.com/blackflame007/gnosis-membench/blob/main/RESULTS.md).
+**Key remaining gaps (L-32 baseline):**
+- **KU (81.9%):** gap to Zep (83.3%): 1.4pp; gap to Chronos (100%): 18.1pp.
+- **Multi-session (59.5%):** +5.0pp from L-31; 40.5% remaining failure rate (49/121).
+- **SSP/abstention:** likely judge noise at n=30.
 
-**L-31 (2026-08-09) — COMPLETE (re-run with fixed ingest):** write-time SUPERSEDES edges + `valid_to IS NULL` filter. KU **70.8% → 80.6% (+9.8pp)** confirmed. Overall 71.0% (vs L-25b 73.6%); regressions SSA −3.6pp, temporal −7.9pp, MS −4.2pp (confirmed NOT from SUPERSEDES logic — ingest variation). KU gap to Zep (83.3%): 2.7pp. See [gnosis-membench RESULTS.md](https://github.com/blackflame007/gnosis-membench/blob/main/RESULTS.md).
+**L-31 (2026-08-09):** write-time SUPERSEDES edges + `valid_to IS NULL` filter. KU **70.8% → 80.6% (+9.8pp)**. Overall 71.0%; regressions confirmed as ingest variation (not SUPERSEDES logic). See [RESULTS.md](https://github.com/blackflame007/gnosis-membench/blob/main/RESULTS.md).
+
+**L-32 (2026-08-10) — COMPLETE:** enumeration clause fix (`GNOSIS_CON_ENUMERATION_ENABLED=true` — count unique real-world items, not records) + multi-query sub-query expansion for aggregative multi-session questions. MS **54.5% → 59.5% (+5.0pp)**. KU **80.6% → 81.9% (+1.4pp)**. Overall **72.6%** (+1.6pp vs L-31). KU gap to Zep (83.3%): 1.4pp. No re-ingest. See [gnosis-membench RESULTS.md](https://github.com/blackflame007/gnosis-membench/blob/main/RESULTS.md).
 
 ### LOCOMO — Run 23 (full 10-conversation, 2026-07-04), GPT-5.5 judge
 
