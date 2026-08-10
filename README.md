@@ -178,31 +178,33 @@ uv run uvicorn gnosis.main:app --host localhost --port 8080
 
 ## Benchmark standing
 
-### LongMemEval_S — L-32 (full 500-Q, 2026-08-10), gpt-4o backbone + judge — **current best post-L-31**
+### LongMemEval_S — L-33 (full 500-Q, 2026-08-10), gpt-4o backbone + judge — **current best**
 
-| Category | gnosis L-32 | gnosis L-25b | Zep | mem0 | Chronos (SOTA) |
+| Category | gnosis L-33 | gnosis L-25b | Zep | mem0 | Chronos (SOTA) |
 |---|---|---|---|---|---|
-| single-session-assistant | **96.4%** (n=56) | 98.2% | — | — | — |
-| single-session-user | **81.2%** (n=64) | 84.4% | — | — | — |
+| single-session-assistant | 94.6% (n=56) | **98.2%** | — | — | — |
+| single-session-user | 82.8% (n=64) | 84.4% | — | — | — |
 | knowledge-update | **81.9%** (n=72) | 70.8% | 83.3% | — | **100%** |
-| temporal-reasoning | 67.7% (n=127) | 74.0% | 62.4% | — | 95.5% |
-| multi-session | **59.5%** (n=121) | 58.7% | 57.9% | — | 88.7% |
-| single-session-preference | 56.7% (n=30) | 60.0% | — | — | — |
-| abstention | 76.7% (n=30) | 83.3% | — | — | — |
-| **Overall** | **72.6%** (500 Q) | 73.6% | 71.2% | 67.6% | 95.6% |
+| temporal-reasoning | 69.3% (n=127) | 74.0% | 62.4% | — | 95.5% |
+| multi-session | **60.3%** (n=121) | 58.7% | 57.9% | — | 88.7% |
+| single-session-preference | **66.7%** (n=30) | 60.0% | — | — | — |
+| abstention | **83.3%** (n=30) | 83.3% | — | — | — |
+| **Overall** | **74.2%** (500 Q) | 73.6% | 71.2% | 67.6% | 95.6% |
 
-*L-32 reuses L-31 Neo4j data (no re-ingest). Best KU (81.9%) and MS (59.5%) to date. L-25b still leads on SSA/SSU/temporal due to ingest variation from L-31 fresh reingest.*
+*L-33 reuses L-31 Neo4j data (no re-ingest). New best overall (74.2%), best KU (81.9%), best MS (60.3%). SSA/temporal remain below L-25b — ingest variation from L-31 fresh reingest.*
 
-**L-32 config (on top of L-31):** `GNOSIS_CON_ENUMERATION_ENABLED=true` + multi-query expansion in membench answer.py for aggregative multi-session questions.
+**L-33 config (on top of L-32):** extended `_AGGREGATIVE_PATTERN` (added `average|percentage|how long`) + 4 sub-queries (was 2) + set-based dedup in membench answer.py.
 
-**Key remaining gaps (L-32 baseline):**
+**Key remaining gaps (L-33 baseline):**
 - **KU (81.9%):** gap to Zep (83.3%): 1.4pp; gap to Chronos (100%): 18.1pp.
-- **Multi-session (59.5%):** +5.0pp from L-31; 40.5% remaining failure rate (49/121).
-- **SSP/abstention:** likely judge noise at n=30.
+- **Multi-session (60.3%):** +0.8pp from L-32; 39.7% remaining failure rate (48/121).
+- **Temporal (69.3%):** gap to L-25b (74.0%): 4.7pp — ingest-variation gap, not an L-33 regression.
 
 **L-31 (2026-08-09):** write-time SUPERSEDES edges + `valid_to IS NULL` filter. KU **70.8% → 80.6% (+9.8pp)**. Overall 71.0%; regressions confirmed as ingest variation (not SUPERSEDES logic). See [RESULTS.md](https://github.com/blackflame007/gnosis-membench/blob/main/RESULTS.md).
 
-**L-32 (2026-08-10) — COMPLETE:** enumeration clause fix (`GNOSIS_CON_ENUMERATION_ENABLED=true` — count unique real-world items, not records) + multi-query sub-query expansion for aggregative multi-session questions. MS **54.5% → 59.5% (+5.0pp)**. KU **80.6% → 81.9% (+1.4pp)**. Overall **72.6%** (+1.6pp vs L-31). KU gap to Zep (83.3%): 1.4pp. No re-ingest. See [gnosis-membench RESULTS.md](https://github.com/blackflame007/gnosis-membench/blob/main/RESULTS.md).
+**L-32 (2026-08-10):** enumeration clause fix (`GNOSIS_CON_ENUMERATION_ENABLED=true`) + 2-sub-query expansion for aggregative multi-session questions. MS **54.5% → 59.5% (+5.0pp)**. Overall **72.6%** (+1.6pp vs L-31). No re-ingest.
+
+**L-33 (2026-08-10) — COMPLETE:** extended aggregative pattern + 4 sub-queries (was 2) + set-based dedup in membench answer.py. Overall **74.2%** (+1.6pp vs L-32, **+0.6pp vs previous best L-25b**). MS **59.5% → 60.3%** (+0.8pp). KU flat (81.9%). No re-ingest. See [gnosis-membench RESULTS.md](https://github.com/blackflame007/gnosis-membench/blob/main/RESULTS.md).
 
 ### LOCOMO — Run 23 (full 10-conversation, 2026-07-04), GPT-5.5 judge
 
