@@ -139,7 +139,8 @@ class RouteDecision:
     budget_multiplier: int
     supersession_enabled: bool
     sufficiency_check_enabled: bool
-    recency_injection_enabled: bool
+    recency_injection_enabled: bool = False
+    filter_superseded: bool = False
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "RouteDecision":
@@ -157,6 +158,7 @@ class RouteDecision:
             supersession_enabled=settings.gnosis_read_supersession_enabled,
             sufficiency_check_enabled=settings.gnosis_sufficiency_check_enabled,
             recency_injection_enabled=False,
+            filter_superseded=False,
         )
 
     @classmethod
@@ -247,6 +249,13 @@ class RouteDecision:
             # original fact. Injecting by recency guarantees the latest ingest
             # is always a candidate regardless of embedding rank.
             recency_injection_enabled=(route == "knowledge_update"),
+            # Structural supersession filter: exclude facts with valid_to set
+            # (marked superseded at write time via SUPERSEDES edges) from the
+            # vector and lexical candidate pools. For knowledge_update queries,
+            # this ensures the dense top-20 contains only current (non-
+            # superseded) facts so the newest value naturally ranks first
+            # without fighting stale facts in embedding space.
+            filter_superseded=(route == "knowledge_update"),
         )
 
 

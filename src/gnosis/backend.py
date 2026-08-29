@@ -2666,7 +2666,11 @@ class Neo4jAgentMemoryBackend:
         )
         if not lexical:
             return dense
-        return fuse_memory_rankings(dense, lexical)
+        return fuse_memory_rankings(
+            dense,
+            lexical,
+            lexical_weight=self._app_settings.gnosis_rrf_lexical_weight,
+        )
 
     async def _lexical_memory_candidates(
         self,
